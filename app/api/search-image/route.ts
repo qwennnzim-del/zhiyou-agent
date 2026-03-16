@@ -15,14 +15,18 @@ export async function POST(req: NextRequest) {
     // If Google API keys are available, try using Google Custom Search first
     if (apiKey && cx) {
       try {
-        const url = `https://customsearch.googleapis.com/customsearch/v1?key=${apiKey}&cx=${cx}&q=${encodeURIComponent(prompt)}&searchType=image&num=6`;
+        const url = `https://www.googleapis.com/customsearch/v1?key=${apiKey}&cx=${cx}&q=${encodeURIComponent(prompt)}&searchType=image&num=6`;
         
         const response = await fetch(url);
         const data = await response.json();
 
         if (!data.error) {
           const imageResults = data.items?.map((item: any) => item.link) || [];
-          return NextResponse.json({ images: imageResults });
+          if (imageResults.length > 0) {
+            return NextResponse.json({ images: imageResults });
+          } else {
+            console.warn('Google Search returned 0 results, falling back to DuckDuckGo.');
+          }
         } else {
           console.warn('Google Search API error, falling back to DuckDuckGo:', data.error.message);
         }
