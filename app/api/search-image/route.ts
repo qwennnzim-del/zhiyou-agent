@@ -29,7 +29,9 @@ export async function POST(req: NextRequest) {
         const data = await response.json();
 
         if (data.images && data.images.length > 0) {
-          const imageResults = data.images.map((item: any) => item.imageUrl);
+          // Use thumbnailUrl for better reliability (bypasses hotlink protection/CORS)
+          // Fallback to imageUrl if thumbnailUrl is not available
+          const imageResults = data.images.map((item: any) => item.thumbnailUrl || item.imageUrl);
           return NextResponse.json({ images: imageResults });
         } else {
           console.warn('Serper.dev returned 0 results, falling back to DuckDuckGo.');
