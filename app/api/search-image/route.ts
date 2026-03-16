@@ -9,29 +9,33 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Prompt is required' }, { status: 400 });
     }
 
-    const apiKey = process.env.GOOGLE_SEARCH_API_KEY;
-    const cx = process.env.GOOGLE_SEARCH_ENGINE_ID;
+    const serperApiKey = process.env.SERPER_API_KEY;
 
-    // If Google API keys are available, try using Google Custom Search first
-    if (apiKey && cx) {
+    // If Serper API key is available, try using Serper.dev first
+    if (serperApiKey) {
       try {
-        const url = `https://www.googleapis.com/customsearch/v1?key=${apiKey}&cx=${cx}&q=${encodeURIComponent(prompt)}&searchType=image&num=6`;
+        const response = await fetch('https://google.serper.dev/images', {
+          method: 'POST',
+          headers: {
+            'X-API-KEY': serperApiKey,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            q: prompt,
+            num: 6
+          })
+        });
         
-        const response = await fetch(url);
         const data = await response.json();
 
-        if (!data.error) {
-          const imageResults = data.items?.map((item: any) => item.link) || [];
-          if (imageResults.length > 0) {
-            return NextResponse.json({ images: imageResults });
-          } else {
-            console.warn('Google Search returned 0 results, falling back to DuckDuckGo.');
-          }
+        if (data.images && data.images.length > 0) {
+          const imageResults = data.images.map((item: any) => item.imageUrl);
+          return NextResponse.json({ images: imageResults });
         } else {
-          console.warn('Google Search API error, falling back to DuckDuckGo:', data.error.message);
+          console.warn('Serper.dev returned 0 results, falling back to DuckDuckGo.');
         }
-      } catch (googleError: any) {
-        console.warn('Google Search API failed, falling back to DuckDuckGo:', googleError.message);
+      } catch (serperError: any) {
+        console.warn('Serper.dev API failed, falling back to DuckDuckGo:', serperError.message);
       }
     }
 
@@ -42,7 +46,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ images: imageResults });
     } catch (ddgError: any) {
       console.error('DuckDuckGo search error:', ddgError);
-      throw new Error('Gagal mencari gambar menggunakan layanan gratis. Silakan atur GOOGLE_SEARCH_API_KEY.');
+      throw new Error('Gagal mencari gambar menggunakan layanan gratis. Silakan atur SERPER_API_KEY.');
     }
 
   } catch (error: any) {
