@@ -12,19 +12,23 @@ export async function POST(req: NextRequest) {
     const apiKey = process.env.GOOGLE_SEARCH_API_KEY;
     const cx = process.env.GOOGLE_SEARCH_ENGINE_ID;
 
-    // If Google API keys are available, use Google Custom Search
+    // If Google API keys are available, try using Google Custom Search first
     if (apiKey && cx) {
-      const url = `https://customsearch.googleapis.com/customsearch/v1?key=${apiKey}&cx=${cx}&q=${encodeURIComponent(prompt)}&searchType=image&num=6`;
-      
-      const response = await fetch(url);
-      const data = await response.json();
+      try {
+        const url = `https://customsearch.googleapis.com/customsearch/v1?key=${apiKey}&cx=${cx}&q=${encodeURIComponent(prompt)}&searchType=image&num=6`;
+        
+        const response = await fetch(url);
+        const data = await response.json();
 
-      if (data.error) {
-        throw new Error(data.error.message || 'Google Search API error');
+        if (!data.error) {
+          const imageResults = data.items?.map((item: any) => item.link) || [];
+          return NextResponse.json({ images: imageResults });
+        } else {
+          console.warn('Google Search API error, falling back to DuckDuckGo:', data.error.message);
+        }
+      } catch (googleError: any) {
+        console.warn('Google Search API failed, falling back to DuckDuckGo:', googleError.message);
       }
-
-      const imageResults = data.items?.map((item: any) => item.link) || [];
-      return NextResponse.json({ images: imageResults });
     }
 
     // Fallback: Use DuckDuckGo Image Search (Free, No API Key required)
