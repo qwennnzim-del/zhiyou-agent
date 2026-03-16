@@ -1,0 +1,37 @@
+@import "tailwindcss";
+@plugin "@tailwindcss/typography";
+
+@property --angle {
+  syntax: '<angle>';
+  initial-value: 0deg;
+  inherits: false;
+}
+
+@keyframes spin-angle {
+  to {
+    --angle: 360deg;
+  }
+}
+
+.animate-border-spin {
+  animation: spin-angle 4s linear infinite;
+}
+
+.animate-border-spin-fast {
+  animation: spin-angle 0.8s linear infinite;
+}
+
+@keyframes shimmer-rtl {
+  0% { transform: translateX(100%); }
+  100% { transform: translateX(-100%); }
+}
+
+.animate-shimmer-rtl {
+  animation: shimmer-rtl 2s infinite linear;
+}
+
+.bg-google-gradient {
+  background-image: linear-gradient(to right, #4285F4, #EA4335, #FBBC05, #34A853);
+  -webkit-background-clip: text;
+  color: transparent;
+}
