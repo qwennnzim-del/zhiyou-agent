@@ -536,17 +536,15 @@ export default function ZhiyouApp() {
           else if (aspectRatio === '3:4') { width = 768; height = 1024; }
 
           const encodedPrompt = encodeURIComponent(userText);
-          const seed1 = Math.floor(Math.random() * 1000000);
-          const seed2 = Math.floor(Math.random() * 1000000);
+          const seed = Math.floor(Math.random() * 1000000);
           
-          const imageUrl1 = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=${width}&height=${height}&nologo=true&seed=${seed1}`;
-          const imageUrl2 = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=${width}&height=${height}&nologo=true&seed=${seed2}`;
+          const imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=${width}&height=${height}&nologo=true&seed=${seed}`;
           
           setIsThinking(false);
           setMessages(prev => {
             const newMessages = [...prev];
             newMessages[newMessages.length - 1].text = "Berikut adalah gambar yang berhasil dibuat berdasarkan permintaan Anda:";
-            newMessages[newMessages.length - 1].imageResults = [imageUrl1, imageUrl2];
+            newMessages[newMessages.length - 1].imageResults = [imageUrl];
             return newMessages;
           });
         } catch (error) {
@@ -1003,28 +1001,19 @@ export default function ZhiyouApp() {
                             )}
                             <div 
                               onClick={() => setShowImagesFor(msg.imageResults!)}
-                              className={`grid ${msg.imageResults!.length === 1 ? 'grid-cols-1' : 'grid-cols-2'} gap-2 rounded-2xl overflow-hidden cursor-pointer hover:opacity-95 transition-opacity border border-gray-100 shadow-sm`}
+                              className="cursor-pointer hover:opacity-95 transition-opacity border border-gray-100 shadow-sm rounded-2xl overflow-hidden"
                             >
-                              {msg.imageResults.slice(0, 4).map((img, i) => (
-                                <div key={i} className={`relative ${msg.imageResults!.length === 1 ? 'aspect-video' : 'aspect-square'} bg-gray-100`}>
-                                  <img 
-                                    src={img} 
-                                    alt="Generated image" 
-                                    className="w-full h-full object-cover" 
-                                    onError={(e) => {
-                                      const target = e.target as HTMLImageElement;
-                                      if (!target.src.includes('/api/proxy-image')) {
-                                        target.src = `/api/proxy-image?url=${encodeURIComponent(img)}`;
-                                      }
-                                    }}
-                                  />
-                                  {i === 3 && msg.imageResults!.length > 4 && (
-                                    <div className="absolute inset-0 bg-black/40 flex items-center justify-center text-white font-bold text-xl backdrop-blur-[2px]">
-                                      +{msg.imageResults!.length - 4}
-                                    </div>
-                                  )}
-                                </div>
-                              ))}
+                              <img 
+                                src={msg.imageResults![0]} 
+                                alt="Generated image" 
+                                className="w-full h-auto object-contain" 
+                                onError={(e) => {
+                                  const target = e.target as HTMLImageElement;
+                                  if (!target.src.includes('/api/proxy-image')) {
+                                    target.src = `/api/proxy-image?url=${encodeURIComponent(msg.imageResults![0])}`;
+                                  }
+                                }}
+                              />
                             </div>
                           </motion.div>
                         )}
