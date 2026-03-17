@@ -504,7 +504,9 @@ export default function ZhiyouApp() {
           return;
         }
 
-        if (credits === null || credits < 20) {
+        const isDeveloper = user?.email === 'cipaonly08@gmail.com';
+
+        if (!isDeveloper && (credits === null || credits < 20)) {
           setIsThinking(false);
           setMessages(prev => {
             const newMessages = [...prev];
@@ -515,19 +517,18 @@ export default function ZhiyouApp() {
           return;
         }
 
-        // Deduct 20 credits
-        const userRef = doc(db, 'users', user.uid);
-        await setDoc(userRef, { credits: credits - 20 }, { merge: true });
-        setCredits(prev => prev !== null ? prev - 20 : null);
+        if (!isDeveloper) {
+          // Deduct 20 credits
+          const userRef = doc(db, 'users', user.uid);
+          await setDoc(userRef, { credits: credits! - 20 }, { merge: true });
+          setCredits(prev => prev !== null ? prev - 20 : null);
+        }
       }
 
       if (featureMode === 'image' || selectedModel === 'zhiyou-art-2.0') {
         if (!user) return;
         
         try {
-          // Simulate a short delay for UX
-          await new Promise(resolve => setTimeout(resolve, 3000));
-          
           let width = 1024;
           let height = 1024;
           if (aspectRatio === '16:9') { width = 1024; height = 576; }
@@ -535,30 +536,43 @@ export default function ZhiyouApp() {
           else if (aspectRatio === '4:3') { width = 1024; height = 768; }
           else if (aspectRatio === '3:4') { width = 768; height = 1024; }
 
-          const encodedPrompt = encodeURIComponent(userText);
           const seed = Math.floor(Math.random() * 1000000);
           
-          // Menggunakan model 'flux' untuk kualitas yang lebih baik
-          const imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=${width}&height=${height}&nologo=true&seed=${seed}&model=flux`;
+          // Call the new API route
+          const response = await fetch('/api/generate-image', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+              prompt: userText, 
+              model: 'flux', // Default to flux, can be made dynamic
+              width, 
+              height, 
+              seed 
+            })
+          });
+          
+          const data = await response.json();
+          
+          if (!response.ok) throw new Error(data.error || 'Failed to generate image');
           
           setIsThinking(false);
           setMessages(prev => {
             const newMessages = [...prev];
-            newMessages[newMessages.length - 1].text = "Berikut adalah gambar yang berhasil dibuat menggunakan model Flux (kualitas tinggi) berdasarkan permintaan Anda:";
-            newMessages[newMessages.length - 1].imageResults = [imageUrl];
+            newMessages[newMessages.length - 1].text = "Berikut adalah gambar yang berhasil dibuat berdasarkan permintaan Anda:";
+            newMessages[newMessages.length - 1].imageResults = [data.imageUrl];
             return newMessages;
           });
-        } catch (error) {
+        } catch (error: any) {
           setIsThinking(false);
           setMessages(prev => {
             const newMessages = [...prev];
-            newMessages[newMessages.length - 1].text = "Maaf, terjadi kesalahan saat membuat gambar.";
+            newMessages[newMessages.length - 1].text = "Maaf, terjadi kesalahan saat membuat gambar: " + error.message;
             return newMessages;
           });
           // Refund credits on failure
           const userRef = doc(db, 'users', user.uid);
-          await setDoc(userRef, { credits: credits }, { merge: true });
-          setCredits(credits);
+          await setDoc(userRef, { credits: credits! + 20 }, { merge: true });
+          setCredits(prev => prev !== null ? prev + 20 : null);
         }
       } else if (featureMode === 'imageSearch' || selectedModel === 'zhiyou-art') {
         try {
