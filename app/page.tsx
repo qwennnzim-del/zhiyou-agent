@@ -523,6 +523,7 @@ export default function ZhiyouApp() {
       }
 
       if (featureMode === 'image' && selectedModel !== 'zhiyou-art') {
+        if (!user) return;
         const taskId = await addTask(user.uid, userText, aspectRatio);
         
         setIsThinking(false);
