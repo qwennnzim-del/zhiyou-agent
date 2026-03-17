@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Menu, Plus, Wand2, ArrowUp, ChevronDown, X, Settings, HelpCircle, LogIn, Image as ImageIcon, Video, FileText, Paperclip, ArrowLeft, BookOpen, Search, Trash2, Globe, ThumbsUp, Copy, Check, Share2, MoreVertical, Download } from 'lucide-react';
+import { Menu, Plus, Wand2, ArrowUp, ChevronDown, X, Settings, HelpCircle, LogIn, Image as ImageIcon, Video, FileText, Paperclip, ArrowLeft, BookOpen, Search, Trash2, Globe, ThumbsUp, Copy, Check, Share2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -36,7 +36,6 @@ type Message = {
   attachments?: Attachment[];
   sources?: Source[];
   imageResults?: string[];
-  modelUsed?: string;
 };
 
 type Chat = {
@@ -89,7 +88,6 @@ export default function ZhiyouApp() {
   const [aspectRatio, setAspectRatio] = useState('1:1');
   const [showSourcesFor, setShowSourcesFor] = useState<Source[] | null>(null);
   const [showImagesFor, setShowImagesFor] = useState<string[] | null>(null);
-  const [openImageMenu, setOpenImageMenu] = useState<number | null>(null);
   const [copiedMessageIndex, setCopiedMessageIndex] = useState<number | null>(null);
   const [likedMessageIndex, setLikedMessageIndex] = useState<number | null>(null);
   const [sharedMessageIndex, setSharedMessageIndex] = useState<number | null>(null);
@@ -451,7 +449,7 @@ export default function ZhiyouApp() {
             }
           }
         }, 3000);
-      } else if (featureMode === 'imageSearch' || selectedModel === 'zhiyou-art') {
+      } else if (featureMode === 'imageSearch') {
         try {
           const response = await fetch('/api/search-image', {
             method: 'POST',
@@ -472,7 +470,6 @@ export default function ZhiyouApp() {
               ? `Berikut adalah beberapa gambar yang saya temukan untuk "${userText}":`
               : `Maaf, saya tidak dapat menemukan gambar untuk "${userText}".`;
             newMessages[newMessages.length - 1].imageResults = data.images || [];
-            newMessages[newMessages.length - 1].modelUsed = selectedModel;
             return newMessages;
           });
         } catch (error: any) {
@@ -543,8 +540,7 @@ export default function ZhiyouApp() {
                 size: a.size
               })) || [],
               sources: m.sources || [],
-              imageResults: m.imageResults || [],
-              modelUsed: m.modelUsed || null
+              imageResults: m.imageResults || []
             }));
             
             setDoc(chatRef, {
@@ -708,7 +704,7 @@ export default function ZhiyouApp() {
               <div className="w-5 h-5 rounded-full bg-white border border-gray-200 flex items-center justify-center shadow-sm">
                 <ZhiyouLogo className="w-3.5 h-3.5" />
               </div>
-              {selectedModel === 'gemini-2.5-flash' ? t('modelZhiyou25') : selectedModel === 'zhiyou-3' ? t('modelZhiyou3') : 'Zhiyou Art'}
+              {selectedModel === 'gemini-2.5-flash' ? t('modelZhiyou25') : t('modelZhiyou3')}
               <ChevronDown className={`w-4 h-4 text-gray-500 transition-transform ${isModelMenuOpen ? 'rotate-180' : ''}`} />
             </button>
             
@@ -732,12 +728,6 @@ export default function ZhiyouApp() {
                     className={`flex flex-col px-3 py-2.5 hover:bg-gray-50 active:scale-[0.98] rounded-xl text-left transition-all ${selectedModel === 'zhiyou-3' ? 'bg-blue-50/50' : ''}`}
                   >
                     <span className="text-sm font-semibold text-gray-900">{t('modelZhiyou3')}</span>
-                  </button>
-                  <button 
-                    onClick={() => { setSelectedModel('zhiyou-art'); setIsModelMenuOpen(false); }}
-                    className={`flex flex-col px-3 py-2.5 hover:bg-gray-50 active:scale-[0.98] rounded-xl text-left transition-all ${selectedModel === 'zhiyou-art' ? 'bg-blue-50/50' : ''}`}
-                  >
-                    <span className="text-sm font-semibold text-gray-900">Zhiyou Art</span>
                   </button>
                 </motion.div>
               )}
@@ -894,27 +884,20 @@ export default function ZhiyouApp() {
                     ) : (
                       <div className="prose prose-slate max-w-none prose-p:leading-relaxed prose-pre:bg-gray-50 prose-pre:text-gray-800 prose-pre:border prose-pre:border-gray-200 prose-a:text-blue-600">
                         {msg.imageResults && msg.imageResults.length > 0 && (
-                          <div className="mb-4">
-                            {msg.modelUsed === 'zhiyou-art' && (
-                              <div className="text-sm font-bold text-transparent bg-clip-text bg-gradient-to-r from-pink-500 to-violet-500 mb-2 flex items-center gap-1.5">
-                                <Wand2 className="w-4 h-4 text-pink-500" /> Zhiyou Art
+                          <div 
+                            onClick={() => setShowImagesFor(msg.imageResults!)}
+                            className="mb-4 grid grid-cols-2 gap-1 rounded-2xl overflow-hidden cursor-pointer hover:opacity-95 transition-opacity border border-gray-100 shadow-sm"
+                          >
+                            {msg.imageResults.slice(0, 4).map((img, i) => (
+                              <div key={i} className={`relative aspect-square bg-gray-100 ${msg.imageResults!.length === 1 ? 'col-span-2 aspect-video' : ''}`}>
+                                <img src={img} alt="Search result" className="w-full h-full object-cover" />
+                                {i === 3 && msg.imageResults!.length > 4 && (
+                                  <div className="absolute inset-0 bg-black/40 flex items-center justify-center text-white font-bold text-xl backdrop-blur-[2px]">
+                                    +{msg.imageResults!.length - 4}
+                                  </div>
+                                )}
                               </div>
-                            )}
-                            <div 
-                              onClick={() => setShowImagesFor(msg.imageResults!)}
-                              className="grid grid-cols-2 gap-1 rounded-2xl overflow-hidden cursor-pointer hover:opacity-95 transition-opacity border border-gray-100 shadow-sm"
-                            >
-                              {msg.imageResults.slice(0, 4).map((img, i) => (
-                                <div key={i} className={`relative aspect-square bg-gray-100 ${msg.imageResults!.length === 1 ? 'col-span-2 aspect-video' : ''}`}>
-                                  <img src={img} alt="Search result" className="w-full h-full object-cover" />
-                                  {i === 3 && msg.imageResults!.length > 4 && (
-                                    <div className="absolute inset-0 bg-black/40 flex items-center justify-center text-white font-bold text-xl backdrop-blur-[2px]">
-                                      +{msg.imageResults!.length - 4}
-                                    </div>
-                                  )}
-                                </div>
-                              ))}
-                            </div>
+                            ))}
                           </div>
                         )}
                         {isThinking && idx === messages.length - 1 && !msg.text ? (
@@ -1081,7 +1064,7 @@ export default function ZhiyouApp() {
                       handleSend();
                     }
                   }}
-                  placeholder={featureMode === 'image' ? t('describeImage') : (featureMode === 'imageSearch' || selectedModel === 'zhiyou-art') ? t('describeSearchImage') : t('askAnything')}
+                  placeholder={featureMode === 'image' ? t('describeImage') : featureMode === 'imageSearch' ? t('describeSearchImage') : t('askAnything')}
                   className={`w-full bg-transparent resize-none outline-none max-h-48 min-h-[40px] text-gray-800 placeholder:text-gray-500 text-base transition-opacity duration-300 ${input.length > 0 ? 'opacity-100' : 'opacity-70'}`}
                   rows={1}
                 />
@@ -1342,8 +1325,8 @@ export default function ZhiyouApp() {
             >
               <div className="flex items-center justify-between p-4 border-b border-gray-100">
                 <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
-                  <Wand2 className="w-5 h-5 text-pink-500" />
-                  Zhiyou Art
+                  <ImageIcon className="w-5 h-5 text-blue-500" />
+                  Galeri Gambar
                 </h3>
                 <button onClick={() => setShowImagesFor(null)} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
                   <X className="w-5 h-5 text-gray-500" />
@@ -1357,82 +1340,18 @@ export default function ZhiyouApp() {
                       initial={{ opacity: 0, scale: 0.9 }}
                       animate={{ opacity: 1, scale: 1 }}
                       transition={{ delay: idx * 0.05 }}
-                      className="flex flex-col bg-white rounded-xl overflow-hidden border border-gray-100 shadow-sm group"
+                      className="relative aspect-square rounded-xl overflow-hidden border border-gray-100 shadow-sm group"
                     >
-                      <div className="relative aspect-square">
-                        <img src={img} alt={`Result ${idx}`} className="w-full h-full object-cover" />
-                        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center">
-                          <a 
-                            href={img} 
-                            target="_blank" 
-                            rel="noopener noreferrer"
-                            className="p-2 bg-white/90 rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-lg"
-                          >
-                            <ImageIcon className="w-4 h-4 text-gray-700" />
-                          </a>
-                        </div>
-                      </div>
-                      <div className="p-2 flex justify-between items-center bg-white border-t border-gray-50">
-                        <span className="text-xs font-medium text-gray-500 truncate">Art {idx + 1}</span>
-                        <div className="relative">
-                          <button 
-                            onClick={() => setOpenImageMenu(openImageMenu === idx ? null : idx)} 
-                            className="p-1 hover:bg-gray-100 rounded-md transition-colors"
-                          >
-                            <MoreVertical className="w-4 h-4 text-gray-600" />
-                          </button>
-                          <AnimatePresence>
-                            {openImageMenu === idx && (
-                              <motion.div 
-                                initial={{ opacity: 0, scale: 0.95, y: 5 }}
-                                animate={{ opacity: 1, scale: 1, y: 0 }}
-                                exit={{ opacity: 0, scale: 0.95, y: 5 }}
-                                className="absolute bottom-full right-0 mb-1 bg-white border border-gray-100 shadow-lg rounded-xl p-1 flex flex-col z-20 w-28"
-                              >
-                                <button 
-                                  onClick={async () => {
-                                    try {
-                                      const response = await fetch(img);
-                                      const blob = await response.blob();
-                                      const blobUrl = URL.createObjectURL(blob);
-                                      const a = document.createElement('a');
-                                      a.href = blobUrl;
-                                      a.download = `zhiyou-art-${Date.now()}.jpg`;
-                                      document.body.appendChild(a);
-                                      a.click();
-                                      document.body.removeChild(a);
-                                      URL.revokeObjectURL(blobUrl);
-                                    } catch (error) {
-                                      window.open(img, '_blank');
-                                    }
-                                    setOpenImageMenu(null);
-                                  }} 
-                                  className="flex items-center gap-2 text-xs text-gray-700 px-2 py-2 hover:bg-gray-50 rounded-lg transition-colors"
-                                >
-                                  <Download className="w-3.5 h-3.5" /> Unduh
-                                </button>
-                                <button 
-                                  onClick={async () => {
-                                    try {
-                                      if (navigator.share) {
-                                        await navigator.share({ title: 'Zhiyou Art', url: img });
-                                      } else {
-                                        navigator.clipboard.writeText(img);
-                                        alert('Link gambar disalin ke clipboard!');
-                                      }
-                                    } catch (err) {
-                                      console.error("Share failed:", err);
-                                    }
-                                    setOpenImageMenu(null);
-                                  }} 
-                                  className="flex items-center gap-2 text-xs text-gray-700 px-2 py-2 hover:bg-gray-50 rounded-lg transition-colors"
-                                >
-                                  <Share2 className="w-3.5 h-3.5" /> Share
-                                </button>
-                              </motion.div>
-                            )}
-                          </AnimatePresence>
-                        </div>
+                      <img src={img} alt={`Result ${idx}`} className="w-full h-full object-cover" />
+                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center">
+                        <a 
+                          href={img} 
+                          target="_blank" 
+                          rel="noopener noreferrer"
+                          className="p-2 bg-white/90 rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-lg"
+                        >
+                          <ImageIcon className="w-4 h-4 text-gray-700" />
+                        </a>
                       </div>
                     </motion.div>
                   ))}
