@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Menu, Plus, Wand2, ArrowUp, ChevronDown, X, Settings, HelpCircle, LogIn, Image as ImageIcon, Video, FileText, Paperclip, ArrowLeft, BookOpen, Search, Trash2, Globe, ThumbsUp, Copy, Check, Share2, MoreHorizontal, Download, Cloud } from 'lucide-react';
+import { Menu, Plus, Wand2, ArrowUp, ChevronDown, X, Settings, HelpCircle, LogIn, Image as ImageIcon, Video, FileText, Paperclip, ArrowLeft, BookOpen, Search, Trash2, Globe, ThumbsUp, Copy, Check, Share2, MoreHorizontal, Download, Cloud, Brain, Zap, Crown } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -13,7 +13,6 @@ import { collection, doc, setDoc, getDoc, onSnapshot, query, orderBy, serverTime
 import { ref, uploadString, getDownloadURL } from 'firebase/storage';
 import { useRouter } from 'next/navigation';
 import { useLanguage } from './contexts/LanguageContext';
-import { addTask } from './lib/imageQueue';
 
 const ai = new GoogleGenAI({ apiKey: process.env.NEXT_PUBLIC_GEMINI_API_KEY });
 
@@ -491,7 +490,7 @@ export default function ZhiyouApp() {
       let fullText = '';
       let sources: Source[] = [];
 
-      const isImageFeature = featureMode === 'image' || featureMode === 'imageSearch' || selectedModel === 'zhiyou-art';
+      const isImageFeature = featureMode === 'image' || featureMode === 'imageSearch' || selectedModel === 'zhiyou-art' || selectedModel === 'zhiyou-art-2.0';
       
       if (isImageFeature) {
         if (!user) {
@@ -522,43 +521,46 @@ export default function ZhiyouApp() {
         setCredits(prev => prev !== null ? prev - 20 : null);
       }
 
-      if (featureMode === 'image' && selectedModel !== 'zhiyou-art') {
+      if (featureMode === 'image' || selectedModel === 'zhiyou-art-2.0') {
         if (!user) return;
-        const taskId = await addTask(user.uid, userText, aspectRatio);
         
-        setIsThinking(false);
-        setMessages(prev => {
-          const newMessages = [...prev];
-          newMessages[newMessages.length - 1].text = "Gambar sedang diproses... (ID Tugas: " + taskId + ")";
-          return newMessages;
-        });
-        
-        // Poll for completion
-        const pollInterval = setInterval(async () => {
-          const taskDoc = await getDoc(doc(db, 'image_tasks', taskId));
-          if (taskDoc.exists()) {
-            const taskData = taskDoc.data();
-            if (taskData.status === 'completed') {
-              clearInterval(pollInterval);
-              setMessages(prev => {
-                const newMessages = [...prev];
-                newMessages[newMessages.length - 1].text = `![Generated Image](${taskData.resultUrl})`;
-                return newMessages;
-              });
-            } else if (taskData.status === 'failed') {
-              clearInterval(pollInterval);
-              setMessages(prev => {
-                const newMessages = [...prev];
-                newMessages[newMessages.length - 1].text = "Maaf, gagal membuat gambar: " + taskData.error;
-                return newMessages;
-              });
-              // Refund credits on failure
-              const userRef = doc(db, 'users', user.uid);
-              await setDoc(userRef, { credits: credits }, { merge: true });
-              setCredits(credits);
-            }
-          }
-        }, 3000);
+        try {
+          // Simulate a short delay for UX
+          await new Promise(resolve => setTimeout(resolve, 3000));
+          
+          let width = 1024;
+          let height = 1024;
+          if (aspectRatio === '16:9') { width = 1024; height = 576; }
+          else if (aspectRatio === '9:16') { width = 576; height = 1024; }
+          else if (aspectRatio === '4:3') { width = 1024; height = 768; }
+          else if (aspectRatio === '3:4') { width = 768; height = 1024; }
+
+          const encodedPrompt = encodeURIComponent(userText);
+          const seed1 = Math.floor(Math.random() * 1000000);
+          const seed2 = Math.floor(Math.random() * 1000000);
+          
+          const imageUrl1 = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=${width}&height=${height}&nologo=true&seed=${seed1}`;
+          const imageUrl2 = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=${width}&height=${height}&nologo=true&seed=${seed2}`;
+          
+          setIsThinking(false);
+          setMessages(prev => {
+            const newMessages = [...prev];
+            newMessages[newMessages.length - 1].text = "Berikut adalah gambar yang berhasil dibuat berdasarkan permintaan Anda:";
+            newMessages[newMessages.length - 1].imageResults = [imageUrl1, imageUrl2];
+            return newMessages;
+          });
+        } catch (error) {
+          setIsThinking(false);
+          setMessages(prev => {
+            const newMessages = [...prev];
+            newMessages[newMessages.length - 1].text = "Maaf, terjadi kesalahan saat membuat gambar.";
+            return newMessages;
+          });
+          // Refund credits on failure
+          const userRef = doc(db, 'users', user.uid);
+          await setDoc(userRef, { credits: credits }, { merge: true });
+          setCredits(credits);
+        }
       } else if (featureMode === 'imageSearch' || selectedModel === 'zhiyou-art') {
         try {
           const response = await fetch('/api/search-image', {
@@ -818,46 +820,15 @@ export default function ZhiyouApp() {
           
           <div className="flex-1 flex justify-center md:justify-start md:ml-4 relative" ref={modelMenuRef}>
             <button 
-              onClick={() => setIsModelMenuOpen(!isModelMenuOpen)}
+              onClick={() => setIsModelMenuOpen(true)}
               className="flex items-center gap-2 px-3 py-1.5 sm:px-4 sm:py-2 bg-gray-50 hover:bg-gray-100 active:scale-95 rounded-full text-sm font-medium transition-all border border-gray-200"
             >
               <div className="w-5 h-5 rounded-full bg-white border border-gray-200 flex items-center justify-center shadow-sm">
                 <ZhiyouLogo className="w-3.5 h-3.5" />
               </div>
-              {selectedModel === 'gemini-2.5-flash' ? t('modelZhiyou25') : selectedModel === 'zhiyou-3' ? t('modelZhiyou3') : 'Zhiyou Art'}
+              {selectedModel === 'gemini-2.5-flash' ? t('modelZhiyou25') : selectedModel === 'zhiyou-3' ? t('modelZhiyou3') : selectedModel === 'zhiyou-art-2.0' ? 'Zhiyou Art 2.0' : 'Zhiyou Art'}
               <ChevronDown className={`w-4 h-4 text-gray-500 transition-transform ${isModelMenuOpen ? 'rotate-180' : ''}`} />
             </button>
-            
-            <AnimatePresence>
-              {isModelMenuOpen && (
-                <motion.div
-                  initial={{ opacity: 0, y: 10, scale: 0.95 }}
-                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                  transition={{ duration: 0.15 }}
-                  className="absolute top-full left-1/2 md:left-0 -translate-x-1/2 md:translate-x-0 mt-2 bg-white rounded-2xl shadow-xl border border-gray-100 p-1.5 flex flex-col gap-0.5 z-50 min-w-[220px]"
-                >
-                  <button 
-                    onClick={() => { setSelectedModel('gemini-2.5-flash'); if (featureMode === 'imageSearch') setFeatureMode('chat'); setIsModelMenuOpen(false); }}
-                    className={`flex flex-col px-3 py-2.5 hover:bg-gray-50 active:scale-[0.98] rounded-xl text-left transition-all ${selectedModel === 'gemini-2.5-flash' ? 'bg-blue-50/50' : ''}`}
-                  >
-                    <span className="text-sm font-semibold text-gray-900">{t('modelZhiyou25')}</span>
-                  </button>
-                  <button 
-                    onClick={() => { setSelectedModel('zhiyou-3'); if (featureMode === 'imageSearch') setFeatureMode('chat'); setIsModelMenuOpen(false); }}
-                    className={`flex flex-col px-3 py-2.5 hover:bg-gray-50 active:scale-[0.98] rounded-xl text-left transition-all ${selectedModel === 'zhiyou-3' ? 'bg-blue-50/50' : ''}`}
-                  >
-                    <span className="text-sm font-semibold text-gray-900">{t('modelZhiyou3')}</span>
-                  </button>
-                  <button 
-                    onClick={() => { setSelectedModel('zhiyou-art'); setFeatureMode('imageSearch'); setIsModelMenuOpen(false); }}
-                    className={`flex flex-col px-3 py-2.5 hover:bg-gray-50 active:scale-[0.98] rounded-xl text-left transition-all ${selectedModel === 'zhiyou-art' ? 'bg-blue-50/50' : ''}`}
-                  >
-                    <span className="text-sm font-semibold text-gray-900">Zhiyou Art</span>
-                  </button>
-                </motion.div>
-              )}
-            </AnimatePresence>
           </div>
           
           {user ? (
@@ -1024,15 +995,21 @@ export default function ZhiyouApp() {
                                 <span className="text-sm font-semibold text-gray-900">Zhiyou Art</span>
                               </div>
                             )}
+                            {msg.model === 'zhiyou-art-2.0' && (
+                              <div className="flex items-center gap-2 mb-2 px-1">
+                                <Wand2 className="w-4 h-4 text-pink-500" />
+                                <span className="text-sm font-semibold text-gray-900">Zhiyou Art 2.0</span>
+                              </div>
+                            )}
                             <div 
                               onClick={() => setShowImagesFor(msg.imageResults!)}
-                              className="grid grid-cols-2 gap-1 rounded-2xl overflow-hidden cursor-pointer hover:opacity-95 transition-opacity border border-gray-100 shadow-sm"
+                              className={`grid ${msg.imageResults!.length === 1 ? 'grid-cols-1' : 'grid-cols-2'} gap-2 rounded-2xl overflow-hidden cursor-pointer hover:opacity-95 transition-opacity border border-gray-100 shadow-sm`}
                             >
                               {msg.imageResults.slice(0, 4).map((img, i) => (
-                                <div key={i} className={`relative aspect-square bg-gray-100 ${msg.imageResults!.length === 1 ? 'col-span-2 aspect-video' : ''}`}>
+                                <div key={i} className={`relative ${msg.imageResults!.length === 1 ? 'aspect-video' : 'aspect-square'} bg-gray-100`}>
                                   <img 
                                     src={img} 
-                                    alt="Search result" 
+                                    alt="Generated image" 
                                     className="w-full h-full object-cover" 
                                     onError={(e) => {
                                       const target = e.target as HTMLImageElement;
@@ -1052,15 +1029,17 @@ export default function ZhiyouApp() {
                           </motion.div>
                         )}
                         {isThinking && idx === messages.length - 1 && !msg.text ? (
-                          msg.model === 'zhiyou-art' ? (
+                          (msg.model === 'zhiyou-art' || msg.model === 'zhiyou-art-2.0') ? (
                             <div className="mb-4">
                               <div className="flex items-center gap-2 mb-2 px-1">
-                                <Wand2 className="w-4 h-4 text-purple-500 animate-pulse" />
-                                <span className="text-sm font-semibold text-gray-900 animate-pulse">Zhiyou Art sedang membuat...</span>
+                                <Wand2 className={`w-4 h-4 ${msg.model === 'zhiyou-art-2.0' ? 'text-pink-500' : 'text-purple-500'} animate-pulse`} />
+                                <span className="text-sm font-semibold text-gray-900 animate-pulse">
+                                  {msg.model === 'zhiyou-art-2.0' ? 'Zhiyou Art 2.0 sedang membuat...' : 'Zhiyou Art sedang mencari...'}
+                                </span>
                               </div>
-                              <div className="grid grid-cols-2 gap-1 rounded-2xl overflow-hidden border border-gray-100 shadow-sm">
-                                {[1, 2, 3, 4].map((i) => (
-                                  <div key={i} className="relative aspect-square bg-gray-200 overflow-hidden">
+                              <div className={`grid ${msg.model === 'zhiyou-art-2.0' ? 'grid-cols-2' : 'grid-cols-2'} gap-1 rounded-2xl overflow-hidden border border-gray-100 shadow-sm`}>
+                                {[1, 2, 3, 4].slice(0, msg.model === 'zhiyou-art-2.0' ? 2 : 4).map((i) => (
+                                  <div key={i} className={`relative bg-gray-200 overflow-hidden ${msg.model === 'zhiyou-art-2.0' ? 'aspect-square' : 'aspect-square'}`}>
                                     <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/50 to-transparent animate-shimmer-rtl"></div>
                                   </div>
                                 ))}
@@ -1304,17 +1283,29 @@ export default function ZhiyouApp() {
                             transition={{ duration: 0.15 }}
                             className="absolute bottom-full left-0 mb-2 bg-white rounded-2xl shadow-xl border border-gray-100 p-1.5 flex flex-col gap-0.5 z-50 min-w-[200px]"
                           >
-                            <button onClick={() => { setFeatureMode('image'); setIsFeatureMenuOpen(false); }} className="flex items-center gap-3 px-3 py-2.5 hover:bg-gray-50 active:scale-[0.98] rounded-xl text-sm font-medium text-gray-700 transition-all text-left">
-                              <div className="w-8 h-8 rounded-lg bg-pink-50 flex items-center justify-center">
+                            <button onClick={() => { setFeatureMode('image'); setSelectedModel('zhiyou-art-2.0'); setIsFeatureMenuOpen(false); }} className="flex items-center gap-3 px-3 py-2.5 hover:bg-gray-50 active:scale-[0.98] rounded-xl text-sm font-medium text-gray-700 transition-all text-left">
+                              <div className="w-8 h-8 rounded-lg bg-pink-50 flex items-center justify-center relative">
                                 <ImageIcon className="w-4 h-4 text-pink-500" />
+                                <Crown className="w-2.5 h-2.5 absolute -top-1 -right-1 text-pink-500" />
                               </div>
-                              {t('featureGenerateImage')}
+                              <div className="flex flex-col">
+                                <div className="flex items-center gap-2">
+                                  <span>{t('featureGenerateImage')}</span>
+                                  <span className="px-1.5 py-0.5 bg-amber-100 text-amber-700 text-[8px] font-bold rounded-full uppercase tracking-wider">VIP</span>
+                                </div>
+                              </div>
                             </button>
                             <button onClick={() => { setFeatureMode('imageSearch'); setSelectedModel('zhiyou-art'); setIsFeatureMenuOpen(false); }} className="flex items-center gap-3 px-3 py-2.5 hover:bg-gray-50 active:scale-[0.98] rounded-xl text-sm font-medium text-gray-700 transition-all text-left">
-                              <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center">
+                              <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center relative">
                                 <Search className="w-4 h-4 text-blue-500" />
+                                <Crown className="w-2.5 h-2.5 absolute -top-1 -right-1 text-blue-500" />
                               </div>
-                              {t('featureSearchImage')}
+                              <div className="flex flex-col">
+                                <div className="flex items-center gap-2">
+                                  <span>{t('featureSearchImage')}</span>
+                                  <span className="px-1.5 py-0.5 bg-purple-100 text-purple-700 text-[8px] font-bold rounded-full uppercase tracking-wider">VIP</span>
+                                </div>
+                              </div>
                             </button>
                             <button onClick={() => { alert(t('featureComingSoon')); setIsFeatureMenuOpen(false); }} className="flex items-center gap-3 px-3 py-2.5 hover:bg-gray-50 active:scale-[0.98] rounded-xl text-sm font-medium text-gray-700 transition-all text-left">
                               <div className="w-8 h-8 rounded-lg bg-indigo-50 flex items-center justify-center">
@@ -1532,6 +1523,109 @@ export default function ZhiyouApp() {
                     </motion.div>
                   ))}
                 </div>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+      {/* Model Selection Bottom Sheet */}
+      <AnimatePresence>
+        {isModelMenuOpen && (
+          <>
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsModelMenuOpen(false)}
+              className="fixed inset-0 bg-black/40 backdrop-blur-md z-[100]"
+            />
+            <motion.div
+              initial={{ y: '100%' }}
+              animate={{ y: 0 }}
+              exit={{ y: '100%' }}
+              transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+              className="fixed bottom-0 left-0 right-0 bg-white rounded-t-3xl shadow-2xl z-[101] p-6 max-h-[85vh] overflow-y-auto"
+            >
+              <div className="w-12 h-1.5 bg-gray-200 rounded-full mx-auto mb-6" />
+              <h2 className="text-xl font-bold text-gray-900 mb-4">Pilih Model</h2>
+              
+              <div className="space-y-3">
+                <button 
+                  onClick={() => { setSelectedModel('gemini-2.5-flash'); if (featureMode === 'imageSearch' || featureMode === 'image') setFeatureMode('chat'); setIsModelMenuOpen(false); }}
+                  className={`w-full flex items-center justify-between p-4 rounded-2xl border transition-all active:scale-[0.98] ${selectedModel === 'gemini-2.5-flash' ? 'border-blue-500 bg-blue-50/30' : 'border-gray-200 hover:border-blue-300 hover:bg-gray-50'}`}
+                >
+                  <div className="flex items-center gap-4">
+                    <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center text-blue-600">
+                      <Zap className="w-5 h-5" />
+                    </div>
+                    <div className="text-left">
+                      <h3 className="font-semibold text-gray-900">Zhiyou 2.5</h3>
+                      <p className="text-sm text-gray-500">Cepat & efisien untuk tugas sehari-hari</p>
+                    </div>
+                  </div>
+                  {selectedModel === 'gemini-2.5-flash' && <Check className="w-5 h-5 text-blue-600" />}
+                </button>
+
+                <button 
+                  onClick={() => { setSelectedModel('zhiyou-3'); if (featureMode === 'imageSearch' || featureMode === 'image') setFeatureMode('chat'); setIsModelMenuOpen(false); }}
+                  className={`w-full flex items-center justify-between p-4 rounded-2xl border transition-all active:scale-[0.98] ${selectedModel === 'zhiyou-3' ? 'border-amber-500 bg-amber-50/30' : 'border-gray-200 hover:border-amber-300 hover:bg-gray-50'}`}
+                >
+                  <div className="flex items-center gap-4">
+                    <div className="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center text-amber-600 relative">
+                      <Brain className="w-5 h-5" />
+                      <Crown className="w-3 h-3 absolute -top-1 -right-1 text-amber-500" />
+                    </div>
+                    <div className="text-left">
+                      <div className="flex items-center gap-2">
+                        <h3 className="font-semibold text-gray-900">Zhiyou 3</h3>
+                        <span className="px-2 py-0.5 bg-amber-100 text-amber-700 text-[10px] font-bold rounded-full uppercase tracking-wider">VIP</span>
+                      </div>
+                      <p className="text-sm text-gray-500">Penalaran tingkat tinggi & matematika</p>
+                    </div>
+                  </div>
+                  {selectedModel === 'zhiyou-3' && <Check className="w-5 h-5 text-amber-600" />}
+                </button>
+
+                <button 
+                  onClick={() => { setSelectedModel('zhiyou-art'); setFeatureMode('imageSearch'); setIsModelMenuOpen(false); }}
+                  className={`w-full flex items-center justify-between p-4 rounded-2xl border transition-all active:scale-[0.98] ${selectedModel === 'zhiyou-art' ? 'border-purple-500 bg-purple-50/30' : 'border-gray-200 hover:border-purple-300 hover:bg-gray-50'}`}
+                >
+                  <div className="flex items-center gap-4">
+                    <div className="w-10 h-10 rounded-full bg-purple-100 flex items-center justify-center text-purple-600 relative">
+                      <Search className="w-5 h-5" />
+                      <Crown className="w-3 h-3 absolute -top-1 -right-1 text-purple-500" />
+                    </div>
+                    <div className="text-left">
+                      <div className="flex items-center gap-2">
+                        <h3 className="font-semibold text-gray-900">Zhiyou Art</h3>
+                        <span className="px-2 py-0.5 bg-purple-100 text-purple-700 text-[10px] font-bold rounded-full uppercase tracking-wider">VIP</span>
+                      </div>
+                      <p className="text-sm text-gray-500">Pencarian gambar cerdas</p>
+                    </div>
+                  </div>
+                  {selectedModel === 'zhiyou-art' && <Check className="w-5 h-5 text-purple-600" />}
+                </button>
+
+                <button 
+                  onClick={() => { setSelectedModel('zhiyou-art-2.0'); setFeatureMode('image'); setIsModelMenuOpen(false); }}
+                  className={`w-full flex items-center justify-between p-4 rounded-2xl border transition-all active:scale-[0.98] ${selectedModel === 'zhiyou-art-2.0' ? 'border-pink-500 bg-pink-50/30' : 'border-gray-200 hover:border-pink-300 hover:bg-gray-50'}`}
+                >
+                  <div className="flex items-center gap-4">
+                    <div className="w-10 h-10 rounded-full bg-pink-100 flex items-center justify-center text-pink-600 relative">
+                      <ImageIcon className="w-5 h-5" />
+                      <Crown className="w-3 h-3 absolute -top-1 -right-1 text-pink-500" />
+                    </div>
+                    <div className="text-left">
+                      <div className="flex items-center gap-2">
+                        <h3 className="font-semibold text-gray-900">Zhiyou Art 2.0</h3>
+                        <span className="px-2 py-0.5 bg-pink-100 text-pink-700 text-[10px] font-bold rounded-full uppercase tracking-wider">Baru</span>
+                        <span className="px-2 py-0.5 bg-amber-100 text-amber-700 text-[10px] font-bold rounded-full uppercase tracking-wider">VIP</span>
+                      </div>
+                      <p className="text-sm text-gray-500">Pembuatan gambar AI berkualitas tinggi</p>
+                    </div>
+                  </div>
+                  {selectedModel === 'zhiyou-art-2.0' && <Check className="w-5 h-5 text-pink-600" />}
+                </button>
               </div>
             </motion.div>
           </>
