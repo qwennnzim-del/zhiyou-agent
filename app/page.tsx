@@ -1,15 +1,16 @@
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Menu, Plus, Wand2, ArrowUp, ChevronDown, X, Settings, HelpCircle, LogIn, Image as ImageIcon, Video, FileText, Paperclip, ArrowLeft, BookOpen, Search, Trash2, Globe, ThumbsUp, Copy, Check, Share2 } from 'lucide-react';
+import { Menu, Plus, Wand2, ArrowUp, ChevronDown, X, Settings, HelpCircle, LogIn, Image as ImageIcon, Video, FileText, Paperclip, ArrowLeft, BookOpen, Search, Trash2, Globe, ThumbsUp, Copy, Check, Share2, MoreHorizontal, Download, Cloud } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { GoogleGenAI } from '@google/genai';
 import Link from 'next/link';
-import { auth, db } from './lib/firebase';
+import { auth, db, storage } from './lib/firebase';
 import { onAuthStateChanged, signOut, User } from 'firebase/auth';
 import { collection, doc, setDoc, getDoc, onSnapshot, query, orderBy, serverTimestamp, deleteDoc } from 'firebase/firestore';
+import { ref, uploadString, getDownloadURL } from 'firebase/storage';
 import { useRouter } from 'next/navigation';
 import { useLanguage } from './contexts/LanguageContext';
 import { addTask } from './lib/imageQueue';
@@ -36,6 +37,7 @@ type Message = {
   attachments?: Attachment[];
   sources?: Source[];
   imageResults?: string[];
+  model?: string;
 };
 
 type Chat = {
@@ -92,6 +94,7 @@ export default function ZhiyouApp() {
   const [likedMessageIndex, setLikedMessageIndex] = useState<number | null>(null);
   const [sharedMessageIndex, setSharedMessageIndex] = useState<number | null>(null);
   const [loadingTextIndex, setLoadingTextIndex] = useState(0);
+  const [openMenuIndex, setOpenMenuIndex] = useState<number | null>(null);
   const { t, language } = useLanguage();
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -105,6 +108,72 @@ export default function ZhiyouApp() {
 
   const thinkingTexts = ["thinking...", "processing...", "analyzing..."];
   const searchingTexts = ["searching...", "browsing the web...", "finding sources..."];
+
+  const handleDownload = async (url: string) => {
+    try {
+      const proxyUrl = `/api/proxy-image?url=${encodeURIComponent(url)}`;
+      const response = await fetch(proxyUrl);
+      if (!response.ok) throw new Error("Failed to fetch image");
+      const blob = await response.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = `zhiyou-art-${Date.now()}.png`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(blobUrl);
+    } catch (error) {
+      console.error("Error downloading image:", error);
+      alert("Gagal mengunduh gambar.");
+    }
+    setOpenMenuIndex(null);
+  };
+
+  const handleShareImage = async (url: string) => {
+    try {
+      if (navigator.share) {
+        await navigator.share({
+          title: 'Zhiyou Art Image',
+          url: url,
+        });
+      } else {
+        navigator.clipboard.writeText(url);
+        alert("URL gambar disalin ke clipboard!");
+      }
+    } catch (err) {
+      console.error("Share failed:", err);
+    }
+    setOpenMenuIndex(null);
+  };
+
+  const handleSaveToCloud = async (url: string) => {
+    if (!user) {
+      alert("Silakan login untuk menyimpan ke cloud.");
+      return;
+    }
+    try {
+      const proxyUrl = `/api/proxy-image?url=${encodeURIComponent(url)}`;
+      const response = await fetch(proxyUrl);
+      if (!response.ok) throw new Error("Failed to fetch image");
+      const blob = await response.blob();
+      
+      const reader = new FileReader();
+      reader.readAsDataURL(blob);
+      reader.onloadend = async () => {
+        const base64data = reader.result as string;
+        const fileName = `zhiyou-art-${Date.now()}.png`;
+        const storageRef = ref(storage, `users/${user.uid}/images/${fileName}`);
+        
+        await uploadString(storageRef, base64data, 'data_url');
+        alert("Gambar berhasil disimpan ke Firebase Storage!");
+      };
+    } catch (error) {
+      console.error("Error saving to cloud:", error);
+      alert("Gagal menyimpan gambar ke cloud.");
+    }
+    setOpenMenuIndex(null);
+  };
 
   useEffect(() => {
     if (isThinking) {
@@ -346,7 +415,7 @@ export default function ZhiyouApp() {
     setLoadingTextIndex(0);
     
     // Add empty model message immediately so loader shows up
-    setMessages(prev => [...prev, { role: 'model', text: '', sources: [] }]);
+    setMessages(prev => [...prev, { role: 'model', text: '', sources: [], model: selectedModel }]);
     
     try {
       const messageParts: any[] = [];
@@ -411,7 +480,7 @@ export default function ZhiyouApp() {
       let fullText = '';
       let sources: Source[] = [];
 
-      if (featureMode === 'image') {
+      if (featureMode === 'image' && selectedModel !== 'zhiyou-art') {
         if (!user) {
           setIsThinking(false);
           setMessages(prev => [...prev, { role: 'model', text: "Silakan login untuk membuat gambar.", sources: [] }]);
@@ -449,7 +518,7 @@ export default function ZhiyouApp() {
             }
           }
         }, 3000);
-      } else if (featureMode === 'imageSearch') {
+      } else if (featureMode === 'imageSearch' || selectedModel === 'zhiyou-art') {
         try {
           const response = await fetch('/api/search-image', {
             method: 'POST',
@@ -704,7 +773,7 @@ export default function ZhiyouApp() {
               <div className="w-5 h-5 rounded-full bg-white border border-gray-200 flex items-center justify-center shadow-sm">
                 <ZhiyouLogo className="w-3.5 h-3.5" />
               </div>
-              {selectedModel === 'gemini-2.5-flash' ? t('modelZhiyou25') : t('modelZhiyou3')}
+              {selectedModel === 'gemini-2.5-flash' ? t('modelZhiyou25') : selectedModel === 'zhiyou-3' ? t('modelZhiyou3') : 'Zhiyou Art'}
               <ChevronDown className={`w-4 h-4 text-gray-500 transition-transform ${isModelMenuOpen ? 'rotate-180' : ''}`} />
             </button>
             
@@ -728,6 +797,12 @@ export default function ZhiyouApp() {
                     className={`flex flex-col px-3 py-2.5 hover:bg-gray-50 active:scale-[0.98] rounded-xl text-left transition-all ${selectedModel === 'zhiyou-3' ? 'bg-blue-50/50' : ''}`}
                   >
                     <span className="text-sm font-semibold text-gray-900">{t('modelZhiyou3')}</span>
+                  </button>
+                  <button 
+                    onClick={() => { setSelectedModel('zhiyou-art'); setIsModelMenuOpen(false); }}
+                    className={`flex flex-col px-3 py-2.5 hover:bg-gray-50 active:scale-[0.98] rounded-xl text-left transition-all ${selectedModel === 'zhiyou-art' ? 'bg-blue-50/50' : ''}`}
+                  >
+                    <span className="text-sm font-semibold text-gray-900">Zhiyou Art</span>
                   </button>
                 </motion.div>
               )}
@@ -884,20 +959,28 @@ export default function ZhiyouApp() {
                     ) : (
                       <div className="prose prose-slate max-w-none prose-p:leading-relaxed prose-pre:bg-gray-50 prose-pre:text-gray-800 prose-pre:border prose-pre:border-gray-200 prose-a:text-blue-600">
                         {msg.imageResults && msg.imageResults.length > 0 && (
-                          <div 
-                            onClick={() => setShowImagesFor(msg.imageResults!)}
-                            className="mb-4 grid grid-cols-2 gap-1 rounded-2xl overflow-hidden cursor-pointer hover:opacity-95 transition-opacity border border-gray-100 shadow-sm"
-                          >
-                            {msg.imageResults.slice(0, 4).map((img, i) => (
-                              <div key={i} className={`relative aspect-square bg-gray-100 ${msg.imageResults!.length === 1 ? 'col-span-2 aspect-video' : ''}`}>
-                                <img src={img} alt="Search result" className="w-full h-full object-cover" />
-                                {i === 3 && msg.imageResults!.length > 4 && (
-                                  <div className="absolute inset-0 bg-black/40 flex items-center justify-center text-white font-bold text-xl backdrop-blur-[2px]">
-                                    +{msg.imageResults!.length - 4}
-                                  </div>
-                                )}
+                          <div className="mb-4">
+                            {msg.model === 'zhiyou-art' && (
+                              <div className="flex items-center gap-2 mb-2 px-1">
+                                <Wand2 className="w-4 h-4 text-purple-500" />
+                                <span className="text-sm font-semibold text-gray-900">Zhiyou Art</span>
                               </div>
-                            ))}
+                            )}
+                            <div 
+                              onClick={() => setShowImagesFor(msg.imageResults!)}
+                              className="grid grid-cols-2 gap-1 rounded-2xl overflow-hidden cursor-pointer hover:opacity-95 transition-opacity border border-gray-100 shadow-sm"
+                            >
+                              {msg.imageResults.slice(0, 4).map((img, i) => (
+                                <div key={i} className={`relative aspect-square bg-gray-100 ${msg.imageResults!.length === 1 ? 'col-span-2 aspect-video' : ''}`}>
+                                  <img src={img} alt="Search result" className="w-full h-full object-cover" />
+                                  {i === 3 && msg.imageResults!.length > 4 && (
+                                    <div className="absolute inset-0 bg-black/40 flex items-center justify-center text-white font-bold text-xl backdrop-blur-[2px]">
+                                      +{msg.imageResults!.length - 4}
+                                    </div>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
                           </div>
                         )}
                         {isThinking && idx === messages.length - 1 && !msg.text ? (
@@ -1325,33 +1408,63 @@ export default function ZhiyouApp() {
             >
               <div className="flex items-center justify-between p-4 border-b border-gray-100">
                 <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
-                  <ImageIcon className="w-5 h-5 text-blue-500" />
-                  Galeri Gambar
+                  <Wand2 className="w-5 h-5 text-purple-500" />
+                  Zhiyou Art
                 </h3>
                 <button onClick={() => setShowImagesFor(null)} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
                   <X className="w-5 h-5 text-gray-500" />
                 </button>
               </div>
               <div className="overflow-y-auto p-4">
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
                   {showImagesFor.map((img, idx) => (
                     <motion.div 
                       key={idx}
                       initial={{ opacity: 0, scale: 0.9 }}
                       animate={{ opacity: 1, scale: 1 }}
                       transition={{ delay: idx * 0.05 }}
-                      className="relative aspect-square rounded-xl overflow-hidden border border-gray-100 shadow-sm group"
+                      className="flex flex-col gap-2"
                     >
-                      <img src={img} alt={`Result ${idx}`} className="w-full h-full object-cover" />
-                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center">
-                        <a 
-                          href={img} 
-                          target="_blank" 
-                          rel="noopener noreferrer"
-                          className="p-2 bg-white/90 rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-lg"
+                      <div className="relative aspect-square rounded-xl overflow-hidden border border-gray-100 shadow-sm group">
+                        <img src={img} alt={`Result ${idx}`} className="w-full h-full object-cover" />
+                        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center">
+                          <a 
+                            href={img} 
+                            target="_blank" 
+                            rel="noopener noreferrer"
+                            className="p-2 bg-white/90 rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-lg"
+                          >
+                            <ImageIcon className="w-4 h-4 text-gray-700" />
+                          </a>
+                        </div>
+                      </div>
+                      <div className="flex justify-end relative">
+                        <button 
+                          onClick={() => setOpenMenuIndex(openMenuIndex === idx ? null : idx)}
+                          className="p-1.5 hover:bg-gray-100 rounded-full text-gray-500 transition-colors"
                         >
-                          <ImageIcon className="w-4 h-4 text-gray-700" />
-                        </a>
+                          <MoreHorizontal className="w-5 h-5" />
+                        </button>
+                        <AnimatePresence>
+                          {openMenuIndex === idx && (
+                            <motion.div
+                              initial={{ opacity: 0, scale: 0.9, y: 5 }}
+                              animate={{ opacity: 1, scale: 1, y: 0 }}
+                              exit={{ opacity: 0, scale: 0.9, y: 5 }}
+                              className="absolute bottom-full right-0 mb-1 bg-white rounded-xl shadow-lg border border-gray-100 p-1.5 z-50 min-w-[160px]"
+                            >
+                              <button onClick={() => handleDownload(img)} className="w-full flex items-center gap-3 px-3 py-2 hover:bg-gray-50 rounded-lg text-sm font-medium text-gray-700 transition-colors">
+                                <Download className="w-4 h-4 text-gray-500" /> Unduh
+                              </button>
+                              <button onClick={() => handleShareImage(img)} className="w-full flex items-center gap-3 px-3 py-2 hover:bg-gray-50 rounded-lg text-sm font-medium text-gray-700 transition-colors">
+                                <Share2 className="w-4 h-4 text-gray-500" /> Share
+                              </button>
+                              <button onClick={() => handleSaveToCloud(img)} className="w-full flex items-center gap-3 px-3 py-2 hover:bg-gray-50 rounded-lg text-sm font-medium text-gray-700 transition-colors">
+                                <Cloud className="w-4 h-4 text-gray-500" /> Simpan ke Cloud
+                              </button>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
                       </div>
                     </motion.div>
                   ))}
