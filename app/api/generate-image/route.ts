@@ -6,12 +6,16 @@ export async function POST(req: Request) {
   try {
     let imageUrl = '';
     
-    // Pollinations API (supports flux, kontext, etc.)
+    // Pollinations API (supports flux, turbo, etc.)
     const encodedPrompt = encodeURIComponent(prompt);
-    // Map internal model names to Pollinations model names if needed
-    const pollinationModel = model === 'flux-2-dev' || model === 'klein' ? 'flux' : model;
     
-    imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=${width}&height=${height}&nologo=true&seed=${seed}&model=${pollinationModel}&apikey=${process.env.POLLINATIONS_API_KEY}`;
+    // Map internal model names to Pollinations model names
+    let pollinationModel = 'flux'; // Default
+    if (model === 'kontext') pollinationModel = 'kontext';
+    // Add other mappings as needed
+    
+    const apiKeyParam = process.env.POLLINATIONS_API_KEY ? `&apikey=${process.env.POLLINATIONS_API_KEY}` : '';
+    imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=${width}&height=${height}&nologo=true&seed=${seed}&model=${pollinationModel}${apiKeyParam}`;
 
     return NextResponse.json({ imageUrl });
   } catch (error) {

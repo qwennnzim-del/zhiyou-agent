@@ -560,6 +560,7 @@ export default function ZhiyouApp() {
             const newMessages = [...prev];
             newMessages[newMessages.length - 1].text = "Berikut adalah gambar yang berhasil dibuat berdasarkan permintaan Anda:";
             newMessages[newMessages.length - 1].imageResults = [data.imageUrl];
+            newMessages[newMessages.length - 1].model = selectedModel;
             return newMessages;
           });
         } catch (error: any) {
@@ -570,11 +571,14 @@ export default function ZhiyouApp() {
             return newMessages;
           });
           // Refund credits on failure
-          const userRef = doc(db, 'users', user.uid);
-          await setDoc(userRef, { credits: credits! + 20 }, { merge: true });
-          setCredits(prev => prev !== null ? prev + 20 : null);
+          if (!isDeveloper && user) {
+            const userRef = doc(db, 'users', user.uid);
+            await setDoc(userRef, { credits: credits! }, { merge: true });
+            setCredits(credits);
+          }
         }
       } else if (featureMode === 'imageSearch' || selectedModel === 'zhiyou-art') {
+        const isDeveloper = user?.email === 'cipaonly08@gmail.com';
         try {
           const response = await fetch('/api/search-image', {
             method: 'POST',
@@ -599,6 +603,7 @@ export default function ZhiyouApp() {
               ? `Berikut adalah beberapa gambar yang saya temukan untuk "${userText}":`
               : `Maaf, saya tidak dapat menemukan gambar untuk "${userText}".`;
             newMessages[newMessages.length - 1].imageResults = data.images || [];
+            newMessages[newMessages.length - 1].model = selectedModel;
             return newMessages;
           });
         } catch (error: any) {
@@ -609,9 +614,9 @@ export default function ZhiyouApp() {
             return newMessages;
           });
           // Refund credits on failure
-          if (user) {
+          if (!isDeveloper && user) {
             const userRef = doc(db, 'users', user.uid);
-            await setDoc(userRef, { credits: credits }, { merge: true });
+            await setDoc(userRef, { credits: credits! }, { merge: true });
             setCredits(credits);
           }
         }
