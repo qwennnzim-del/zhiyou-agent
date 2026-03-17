@@ -538,12 +538,13 @@ export default function ZhiyouApp() {
           const encodedPrompt = encodeURIComponent(userText);
           const seed = Math.floor(Math.random() * 1000000);
           
-          const imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=${width}&height=${height}&nologo=true&seed=${seed}`;
+          // Menggunakan model 'flux' untuk kualitas yang lebih baik
+          const imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=${width}&height=${height}&nologo=true&seed=${seed}&model=flux`;
           
           setIsThinking(false);
           setMessages(prev => {
             const newMessages = [...prev];
-            newMessages[newMessages.length - 1].text = "Berikut adalah gambar yang berhasil dibuat berdasarkan permintaan Anda:";
+            newMessages[newMessages.length - 1].text = "Berikut adalah gambar yang berhasil dibuat menggunakan model Flux (kualitas tinggi) berdasarkan permintaan Anda:";
             newMessages[newMessages.length - 1].imageResults = [imageUrl];
             return newMessages;
           });
@@ -881,38 +882,6 @@ export default function ZhiyouApp() {
               >
                 {t('howCanIHelp')}
               </motion.p>
-
-              <motion.div 
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.3, duration: 0.5 }}
-                className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full max-w-xl"
-              >
-                <button 
-                  onClick={() => setFeatureMode('imageSearch')}
-                  className="flex items-center gap-3 p-4 bg-white border border-gray-100 rounded-2xl hover:border-blue-200 hover:bg-blue-50/30 transition-all text-left group"
-                >
-                  <div className="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center group-hover:scale-110 transition-transform">
-                    <Search className="w-5 h-5 text-blue-500" />
-                  </div>
-                  <div>
-                    <div className="text-sm font-semibold text-gray-900">{t('featureSearchImage')}</div>
-                    <div className="text-xs text-gray-500">Cari gambar referensi di web</div>
-                  </div>
-                </button>
-                <button 
-                  onClick={() => setFeatureMode('image')}
-                  className="flex items-center gap-3 p-4 bg-white border border-gray-100 rounded-2xl hover:border-pink-200 hover:bg-pink-50/30 transition-all text-left group"
-                >
-                  <div className="w-10 h-10 rounded-xl bg-pink-50 flex items-center justify-center group-hover:scale-110 transition-transform">
-                    <ImageIcon className="w-5 h-5 text-pink-500" />
-                  </div>
-                  <div>
-                    <div className="text-sm font-semibold text-gray-900">{t('featureGenerateImage')}</div>
-                    <div className="text-xs text-gray-500">Buat gambar AI dari teks</div>
-                  </div>
-                </button>
-              </motion.div>
             </div>
           ) : (
             <div className="max-w-3xl mx-auto w-full px-4 py-6 space-y-8">
