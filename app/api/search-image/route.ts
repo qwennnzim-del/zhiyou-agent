@@ -10,6 +10,7 @@ export async function POST(req: NextRequest) {
     }
 
     const serperApiKey = process.env.SERPER_API_KEY;
+    const hdPrompt = `${prompt} high resolution HD 4k`;
 
     // If Serper API key is available, try using Serper.dev first
     if (serperApiKey) {
@@ -21,7 +22,7 @@ export async function POST(req: NextRequest) {
             'Content-Type': 'application/json'
           },
           body: JSON.stringify({
-            q: prompt,
+            q: hdPrompt,
             num: 6
           })
         });
@@ -29,9 +30,8 @@ export async function POST(req: NextRequest) {
         const data = await response.json();
 
         if (data.images && data.images.length > 0) {
-          // Use thumbnailUrl for better reliability (bypasses hotlink protection/CORS)
-          // Fallback to imageUrl if thumbnailUrl is not available
-          const imageResults = data.images.map((item: any) => item.thumbnailUrl || item.imageUrl);
+          // Use imageUrl for HD quality, fallback to thumbnailUrl if not available
+          const imageResults = data.images.map((item: any) => item.imageUrl || item.thumbnailUrl);
           return NextResponse.json({ images: imageResults });
         } else {
           console.warn('Serper.dev returned 0 results, falling back to DuckDuckGo.');
@@ -43,7 +43,7 @@ export async function POST(req: NextRequest) {
 
     // Fallback: Use DuckDuckGo Image Search (Free, No API Key required)
     try {
-      const results = await image_search({ query: prompt, moderate: true });
+      const results = await image_search({ query: hdPrompt, moderate: true });
       const imageResults = results.slice(0, 6).map((r: any) => r.image);
       return NextResponse.json({ images: imageResults });
     } catch (ddgError: any) {

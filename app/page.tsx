@@ -68,6 +68,7 @@ const ZhiyouLogo = ({ className = "w-5 h-5" }: { className?: string }) => (
 export default function ZhiyouApp() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [user, setUser] = useState<User | null>(null);
+  const [credits, setCredits] = useState<number | null>(null);
   const [chatId, setChatId] = useState<string | null>(null);
   const [chatHistory, setChatHistory] = useState<Chat[]>([]);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
@@ -81,7 +82,6 @@ export default function ZhiyouApp() {
   const [isAttachmentMenuOpen, setIsAttachmentMenuOpen] = useState(false);
   const [isFeatureMenuOpen, setIsFeatureMenuOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [chatToDelete, setChatToDelete] = useState<string | null>(null);
   const [isTyping, setIsTyping] = useState(false);
   const [isModelMenuOpen, setIsModelMenuOpen] = useState(false);
@@ -243,6 +243,30 @@ export default function ZhiyouApp() {
   useEffect(() => {
     if (!user) return;
     
+    const userRef = doc(db, 'users', user.uid);
+    const unsubscribe = onSnapshot(userRef, async (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        if (data.credits !== undefined) {
+          setCredits(data.credits);
+        } else {
+          // Initialize credits if not present
+          await setDoc(userRef, { credits: 60 }, { merge: true });
+          setCredits(60);
+        }
+      } else {
+        // Create user document with initial credits
+        await setDoc(userRef, { credits: 60, createdAt: serverTimestamp() });
+        setCredits(60);
+      }
+    });
+
+    return () => unsubscribe();
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) return;
+    
     const chatsRef = collection(db, 'users', user.uid, 'chats');
     const q = query(chatsRef, orderBy('updatedAt', 'desc'));
     
@@ -274,19 +298,6 @@ export default function ZhiyouApp() {
       }
     } catch (error) {
       console.error("Error loading chat:", error);
-    }
-  };
-
-  const handleLogout = () => {
-    setShowLogoutConfirm(true);
-  };
-
-  const confirmLogout = async () => {
-    try {
-      await signOut(auth);
-      router.push('/login');
-    } catch (error) {
-      console.error("Error signing out:", error);
     }
   };
 
@@ -480,13 +491,38 @@ export default function ZhiyouApp() {
       let fullText = '';
       let sources: Source[] = [];
 
-      if (featureMode === 'image' && selectedModel !== 'zhiyou-art') {
+      const isImageFeature = featureMode === 'image' || featureMode === 'imageSearch' || selectedModel === 'zhiyou-art';
+      
+      if (isImageFeature) {
         if (!user) {
           setIsThinking(false);
-          setMessages(prev => [...prev, { role: 'model', text: "Silakan login untuk membuat gambar.", sources: [] }]);
+          setMessages(prev => {
+            const newMessages = [...prev];
+            newMessages[newMessages.length - 1].text = "Silakan login untuk menggunakan fitur ini.";
+            return newMessages;
+          });
+          setIsLoading(false);
           return;
         }
-        
+
+        if (credits === null || credits < 20) {
+          setIsThinking(false);
+          setMessages(prev => {
+            const newMessages = [...prev];
+            newMessages[newMessages.length - 1].text = "Penggunaan free tier kredit anda sudah habis, anda bisa berlangganan untuk fitur \"Pro\" \"Standar\" dan \"Ultra\" di menu setting.";
+            return newMessages;
+          });
+          setIsLoading(false);
+          return;
+        }
+
+        // Deduct 20 credits
+        const userRef = doc(db, 'users', user.uid);
+        await setDoc(userRef, { credits: credits - 20 }, { merge: true });
+        setCredits(prev => prev !== null ? prev - 20 : null);
+      }
+
+      if (featureMode === 'image' && selectedModel !== 'zhiyou-art') {
         const taskId = await addTask(user.uid, userText, aspectRatio);
         
         setIsThinking(false);
@@ -515,6 +551,10 @@ export default function ZhiyouApp() {
                 newMessages[newMessages.length - 1].text = "Maaf, gagal membuat gambar: " + taskData.error;
                 return newMessages;
               });
+              // Refund credits on failure
+              const userRef = doc(db, 'users', user.uid);
+              await setDoc(userRef, { credits: credits }, { merge: true });
+              setCredits(credits);
             }
           }
         }, 3000);
@@ -527,6 +567,10 @@ export default function ZhiyouApp() {
           });
           
           const data = await response.json();
+          
+          // Add 3 second delay for loading effect
+          await new Promise(resolve => setTimeout(resolve, 3000));
+          
           setIsThinking(false);
 
           if (!response.ok) {
@@ -548,6 +592,12 @@ export default function ZhiyouApp() {
             newMessages[newMessages.length - 1].text = "Maaf, terjadi kesalahan saat mencari gambar: " + error.message;
             return newMessages;
           });
+          // Refund credits on failure
+          if (user) {
+            const userRef = doc(db, 'users', user.uid);
+            await setDoc(userRef, { credits: credits }, { merge: true });
+            setCredits(credits);
+          }
         }
       } else {
         const responseStream = await ai.models.generateContentStream({
@@ -787,19 +837,19 @@ export default function ZhiyouApp() {
                   className="absolute top-full left-1/2 md:left-0 -translate-x-1/2 md:translate-x-0 mt-2 bg-white rounded-2xl shadow-xl border border-gray-100 p-1.5 flex flex-col gap-0.5 z-50 min-w-[220px]"
                 >
                   <button 
-                    onClick={() => { setSelectedModel('gemini-2.5-flash'); setIsModelMenuOpen(false); }}
+                    onClick={() => { setSelectedModel('gemini-2.5-flash'); if (featureMode === 'imageSearch') setFeatureMode('chat'); setIsModelMenuOpen(false); }}
                     className={`flex flex-col px-3 py-2.5 hover:bg-gray-50 active:scale-[0.98] rounded-xl text-left transition-all ${selectedModel === 'gemini-2.5-flash' ? 'bg-blue-50/50' : ''}`}
                   >
                     <span className="text-sm font-semibold text-gray-900">{t('modelZhiyou25')}</span>
                   </button>
                   <button 
-                    onClick={() => { setSelectedModel('zhiyou-3'); setIsModelMenuOpen(false); }}
+                    onClick={() => { setSelectedModel('zhiyou-3'); if (featureMode === 'imageSearch') setFeatureMode('chat'); setIsModelMenuOpen(false); }}
                     className={`flex flex-col px-3 py-2.5 hover:bg-gray-50 active:scale-[0.98] rounded-xl text-left transition-all ${selectedModel === 'zhiyou-3' ? 'bg-blue-50/50' : ''}`}
                   >
                     <span className="text-sm font-semibold text-gray-900">{t('modelZhiyou3')}</span>
                   </button>
                   <button 
-                    onClick={() => { setSelectedModel('zhiyou-art'); setIsModelMenuOpen(false); }}
+                    onClick={() => { setSelectedModel('zhiyou-art'); setFeatureMode('imageSearch'); setIsModelMenuOpen(false); }}
                     className={`flex flex-col px-3 py-2.5 hover:bg-gray-50 active:scale-[0.98] rounded-xl text-left transition-all ${selectedModel === 'zhiyou-art' ? 'bg-blue-50/50' : ''}`}
                   >
                     <span className="text-sm font-semibold text-gray-900">Zhiyou Art</span>
@@ -811,13 +861,15 @@ export default function ZhiyouApp() {
           
           {user ? (
             <div className="flex items-center gap-3">
+              <Link href="/settings" className="flex items-center gap-2 bg-gradient-to-r from-amber-100 to-orange-100 px-3 py-1.5 rounded-full border border-amber-200/50 shadow-sm cursor-pointer hover:scale-105 transition-transform" title="Your Credits">
+                <span className="text-amber-600 font-bold text-sm">✨ {credits !== null ? credits : '...'}</span>
+              </Link>
               <div className="hidden sm:flex flex-col items-end">
                 <span className="text-sm font-medium text-gray-900">{user.displayName || 'User'}</span>
               </div>
-              <img src={user.photoURL || `https://ui-avatars.com/api/?name=${user.displayName || 'User'}&background=random`} alt="Profile" className="w-8 h-8 rounded-full border border-gray-200 hover:scale-105 transition-transform cursor-pointer" />
-              <button onClick={handleLogout} className="p-2 text-gray-500 hover:text-red-500 hover:bg-red-50 active:scale-90 rounded-full transition-all" title="Logout">
-                <LogIn className="w-5 h-5 rotate-180" />
-              </button>
+              <Link href="/settings">
+                <img src={user.photoURL || `https://ui-avatars.com/api/?name=${user.displayName || 'User'}&background=random`} alt="Profile" className="w-8 h-8 rounded-full border border-gray-200 hover:scale-105 transition-transform cursor-pointer" />
+              </Link>
             </div>
           ) : (
             <Link href="/login" className="flex items-center gap-2 px-4 py-1.5 sm:px-5 sm:py-2 rounded-full text-sm font-medium text-gray-900 bg-gradient-to-r from-blue-100 via-purple-100 to-pink-100 hover:opacity-90 active:scale-95 transition-all">
@@ -959,7 +1011,12 @@ export default function ZhiyouApp() {
                     ) : (
                       <div className="prose prose-slate max-w-none prose-p:leading-relaxed prose-pre:bg-gray-50 prose-pre:text-gray-800 prose-pre:border prose-pre:border-gray-200 prose-a:text-blue-600">
                         {msg.imageResults && msg.imageResults.length > 0 && (
-                          <div className="mb-4">
+                          <motion.div 
+                            initial={{ opacity: 0, y: 10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ duration: 0.5, ease: "easeOut" }}
+                            className="mb-4"
+                          >
                             {msg.model === 'zhiyou-art' && (
                               <div className="flex items-center gap-2 mb-2 px-1">
                                 <Wand2 className="w-4 h-4 text-purple-500" />
@@ -972,7 +1029,17 @@ export default function ZhiyouApp() {
                             >
                               {msg.imageResults.slice(0, 4).map((img, i) => (
                                 <div key={i} className={`relative aspect-square bg-gray-100 ${msg.imageResults!.length === 1 ? 'col-span-2 aspect-video' : ''}`}>
-                                  <img src={img} alt="Search result" className="w-full h-full object-cover" />
+                                  <img 
+                                    src={img} 
+                                    alt="Search result" 
+                                    className="w-full h-full object-cover" 
+                                    onError={(e) => {
+                                      const target = e.target as HTMLImageElement;
+                                      if (!target.src.includes('/api/proxy-image')) {
+                                        target.src = `/api/proxy-image?url=${encodeURIComponent(img)}`;
+                                      }
+                                    }}
+                                  />
                                   {i === 3 && msg.imageResults!.length > 4 && (
                                     <div className="absolute inset-0 bg-black/40 flex items-center justify-center text-white font-bold text-xl backdrop-blur-[2px]">
                                       +{msg.imageResults!.length - 4}
@@ -981,23 +1048,39 @@ export default function ZhiyouApp() {
                                 </div>
                               ))}
                             </div>
-                          </div>
+                          </motion.div>
                         )}
                         {isThinking && idx === messages.length - 1 && !msg.text ? (
-                          <div className="flex items-center gap-2 mt-2">
-                            <div className="relative overflow-hidden rounded-full px-4 py-1.5 bg-gray-100/80 border border-gray-200/50 shadow-sm">
-                              <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/60 to-transparent animate-shimmer-rtl"></div>
-                              {isSearchEnabled ? (
-                                <span className="relative z-10 font-medium text-sm tracking-wide bg-google-gradient drop-shadow-sm">
-                                  {searchingTexts[loadingTextIndex]}
-                                </span>
-                              ) : (
-                                <span className="relative z-10 font-medium text-sm tracking-wide text-gray-600 drop-shadow-[0_0_8px_rgba(59,130,246,0.3)]">
-                                  {thinkingTexts[loadingTextIndex]}
-                                </span>
-                              )}
+                          msg.model === 'zhiyou-art' ? (
+                            <div className="mb-4">
+                              <div className="flex items-center gap-2 mb-2 px-1">
+                                <Wand2 className="w-4 h-4 text-purple-500 animate-pulse" />
+                                <span className="text-sm font-semibold text-gray-900 animate-pulse">Zhiyou Art sedang membuat...</span>
+                              </div>
+                              <div className="grid grid-cols-2 gap-1 rounded-2xl overflow-hidden border border-gray-100 shadow-sm">
+                                {[1, 2, 3, 4].map((i) => (
+                                  <div key={i} className="relative aspect-square bg-gray-200 overflow-hidden">
+                                    <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/50 to-transparent animate-shimmer-rtl"></div>
+                                  </div>
+                                ))}
+                              </div>
                             </div>
-                          </div>
+                          ) : (
+                            <div className="flex items-center gap-2 mt-2">
+                              <div className="relative overflow-hidden rounded-full px-4 py-1.5 bg-gray-100/80 border border-gray-200/50 shadow-sm">
+                                <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/60 to-transparent animate-shimmer-rtl"></div>
+                                {isSearchEnabled ? (
+                                  <span className="relative z-10 font-medium text-sm tracking-wide bg-google-gradient drop-shadow-sm">
+                                    {searchingTexts[loadingTextIndex]}
+                                  </span>
+                                ) : (
+                                  <span className="relative z-10 font-medium text-sm tracking-wide text-gray-600 drop-shadow-[0_0_8px_rgba(59,130,246,0.3)]">
+                                    {thinkingTexts[loadingTextIndex]}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          )
                         ) : (
                           <>
                             <ReactMarkdown remarkPlugins={[remarkGfm]}>
@@ -1226,7 +1309,7 @@ export default function ZhiyouApp() {
                               </div>
                               {t('featureGenerateImage')}
                             </button>
-                            <button onClick={() => { setFeatureMode('imageSearch'); setIsFeatureMenuOpen(false); }} className="flex items-center gap-3 px-3 py-2.5 hover:bg-gray-50 active:scale-[0.98] rounded-xl text-sm font-medium text-gray-700 transition-all text-left">
+                            <button onClick={() => { setFeatureMode('imageSearch'); setSelectedModel('zhiyou-art'); setIsFeatureMenuOpen(false); }} className="flex items-center gap-3 px-3 py-2.5 hover:bg-gray-50 active:scale-[0.98] rounded-xl text-sm font-medium text-gray-700 transition-all text-left">
                               <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center">
                                 <Search className="w-4 h-4 text-blue-500" />
                               </div>
@@ -1275,37 +1358,6 @@ export default function ZhiyouApp() {
           </div>
         </div>
       </div>
-
-      {/* Logout Confirmation Dialog */}
-      <AnimatePresence>
-        {showLogoutConfirm && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-xl"
-            >
-              <h3 className="text-xl font-semibold text-gray-900 mb-2">{t('logoutConfirmTitle')}</h3>
-              <p className="text-gray-500 text-sm mb-6">{t('logoutConfirmDesc')}</p>
-              <div className="flex gap-3 justify-end">
-                <button 
-                  onClick={() => setShowLogoutConfirm(false)}
-                  className="px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
-                >
-                  {t('cancel')}
-                </button>
-                <button 
-                  onClick={confirmLogout}
-                  className="px-4 py-2 text-sm font-medium text-white bg-red-500 hover:bg-red-600 rounded-lg transition-colors"
-                >
-                  {t('yesLogout')}
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
 
       {/* Delete Chat Confirmation Dialog */}
       <AnimatePresence>
@@ -1426,7 +1478,17 @@ export default function ZhiyouApp() {
                       className="flex flex-col gap-2"
                     >
                       <div className="relative aspect-square rounded-xl overflow-hidden border border-gray-100 shadow-sm group">
-                        <img src={img} alt={`Result ${idx}`} className="w-full h-full object-cover" />
+                        <img 
+                          src={img} 
+                          alt={`Result ${idx}`} 
+                          className="w-full h-full object-cover" 
+                          onError={(e) => {
+                            const target = e.target as HTMLImageElement;
+                            if (!target.src.includes('/api/proxy-image')) {
+                              target.src = `/api/proxy-image?url=${encodeURIComponent(img)}`;
+                            }
+                          }}
+                        />
                         <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center">
                           <a 
                             href={img} 
