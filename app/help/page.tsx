@@ -38,7 +38,7 @@ export default function HelpPage() {
             <section>
               <h2 className="text-2xl font-semibold border-b pb-2 mb-4">Bagaimana cara kerja Zhiyou?</h2>
               <p>
-                Zhiyou menggunakan model bahasa besar (Large Language Model) canggih dari Google (Gemini). Saat Anda mengirim pesan, Zhiyou menganalisis konteks, mencari informasi yang relevan, dan menghasilkan teks atau analisis berdasarkan pola yang dipelajarinya dari jutaan data. Fitur multimodal kami memungkinkan AI untuk &quot;melihat&quot; dan memahami gambar serta dokumen yang Anda unggah.
+                Zhiyou menggunakan model bahasa besar (Large Language Model) canggih dari Zent Technology. Saat Anda mengirim pesan, Zhiyou menganalisis konteks, mencari informasi yang relevan, dan menghasilkan teks atau analisis berdasarkan pola yang dipelajarinya dari jutaan data. Fitur multimodal kami memungkinkan AI untuk &quot;melihat&quot; dan memahami gambar serta dokumen yang Anda unggah.
               </p>
             </section>
 
@@ -59,7 +59,7 @@ export default function HelpPage() {
             <section>
               <h2 className="text-2xl font-semibold border-b pb-2 mb-4">Cara mendapatkan fitur Pro Zhiyou</h2>
               <p>
-                Fitur Pro memberikan akses ke model AI yang lebih kuat (seperti Gemini Pro), batas unggahan file yang lebih besar, dan respons yang lebih cepat. Untuk berlangganan:
+                Fitur Pro memberikan akses ke model AI yang lebih kuat (seperti Zhiyou 3), batas unggahan file yang lebih besar, dan respons yang lebih cepat. Untuk berlangganan:
               </p>
               <ol className="list-decimal pl-5 space-y-2 mt-4">
                 <li>Buka menu <strong>Pengaturan</strong> di sidebar kiri.</li>

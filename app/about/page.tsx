@@ -31,7 +31,7 @@ export default function AboutPage() {
         <section className="mb-12">
           <h2 className="text-2xl font-semibold mb-4">Teknologi</h2>
           <p className="text-lg text-zinc-700 leading-relaxed">
-            Zhiyou AI dibangun menggunakan teknologi mutakhir dari Google Gemini, memastikan 
+            Zhiyou AI dibangun menggunakan teknologi mutakhir dari Zent Technology, memastikan 
             respons yang cepat, akurat, dan aman. Kami mengutamakan privasi pengguna dan 
             keamanan data dalam setiap fitur yang kami luncurkan.
           </p>

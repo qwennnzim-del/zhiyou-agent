@@ -4,7 +4,7 @@ export default function manifest(): MetadataRoute.Manifest {
   return {
     name: 'Zhiyou AI Assistant',
     short_name: 'Zhiyou',
-    description: 'Zhiyou AI Assistant powered by Gemini',
+    description: 'Zhiyou AI Assistant',
     start_url: '/',
     display: 'standalone',
     background_color: '#ffffff',
