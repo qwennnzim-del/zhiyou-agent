@@ -98,6 +98,8 @@ export default function ZhiyouApp() {
   const [selectedImageForActions, setSelectedImageForActions] = useState<string | null>(null);
   const [isImageActionSheetOpen, setIsImageActionSheetOpen] = useState(false);
   const [openMenuIndex, setOpenMenuIndex] = useState<number | null>(null);
+  const [isSavingToCloud, setIsSavingToCloud] = useState(false);
+  const [savingProgress, setSavingProgress] = useState('');
   const { t, language } = useLanguage();
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -115,10 +117,33 @@ export default function ZhiyouApp() {
 
   const handleDownload = async (url: string) => {
     try {
-      const proxyUrl = `/api/proxy-image?url=${encodeURIComponent(url)}`;
-      const response = await fetch(proxyUrl);
-      if (!response.ok) throw new Error("Failed to fetch image");
-      const blob = await response.blob();
+      let blob: Blob;
+      
+      if (url.startsWith('data:')) {
+        // Handle base64 data URL directly
+        const [header, base64Data] = url.split(',');
+        const mimeType = header.split(':')[1].split(';')[0];
+        const byteCharacters = atob(base64Data);
+        const byteArrays = [];
+        
+        for (let offset = 0; offset < byteCharacters.length; offset += 512) {
+          const slice = byteCharacters.slice(offset, offset + 512);
+          const byteNumbers = new Array(slice.length);
+          for (let i = 0; i < slice.length; i++) {
+            byteNumbers[i] = slice.charCodeAt(i);
+          }
+          const byteArray = new Uint8Array(byteNumbers);
+          byteArrays.push(byteArray);
+        }
+        
+        blob = new Blob(byteArrays, { type: mimeType });
+      } else {
+        // Handle external URL via proxy
+        const proxyUrl = `/api/proxy-image?url=${encodeURIComponent(url)}`;
+        const response = await fetch(proxyUrl);
+        if (!response.ok) throw new Error("Failed to fetch image");
+        blob = await response.blob();
+      }
       
       // Create image object to draw on canvas
       const img = new Image();
@@ -228,9 +253,30 @@ export default function ZhiyouApp() {
 
   const startAnalysis = async (url: string) => {
     try {
-      const proxyUrl = `/api/proxy-image?url=${encodeURIComponent(url)}`;
-      const response = await fetch(proxyUrl);
-      const blob = await response.blob();
+      let blob: Blob;
+      
+      if (url.startsWith('data:')) {
+        const [header, base64Data] = url.split(',');
+        const mimeType = header.split(':')[1].split(';')[0];
+        const byteCharacters = atob(base64Data);
+        const byteArrays = [];
+        
+        for (let offset = 0; offset < byteCharacters.length; offset += 512) {
+          const slice = byteCharacters.slice(offset, offset + 512);
+          const byteNumbers = new Array(slice.length);
+          for (let i = 0; i < slice.length; i++) {
+            byteNumbers[i] = slice.charCodeAt(i);
+          }
+          const byteArray = new Uint8Array(byteNumbers);
+          byteArrays.push(byteArray);
+        }
+        
+        blob = new Blob(byteArrays, { type: mimeType });
+      } else {
+        const proxyUrl = `/api/proxy-image?url=${encodeURIComponent(url)}`;
+        const response = await fetch(proxyUrl);
+        blob = await response.blob();
+      }
       
       const reader = new FileReader();
       reader.onloadend = () => {
@@ -294,27 +340,132 @@ export default function ZhiyouApp() {
       alert("Silakan login untuk menyimpan ke cloud.");
       return;
     }
+    
+    setIsSavingToCloud(true);
+    setSavingProgress("Menyimpan gambar...");
+    
     try {
-      const proxyUrl = `/api/proxy-image?url=${encodeURIComponent(url)}`;
-      const response = await fetch(proxyUrl);
-      if (!response.ok) throw new Error("Failed to fetch image");
-      const blob = await response.blob();
+      let blob: Blob;
+      if (url.startsWith('data:')) {
+        const [header, base64Data] = url.split(',');
+        const mimeType = header.split(':')[1].split(';')[0];
+        const byteCharacters = atob(base64Data);
+        const byteArrays = [];
+        for (let offset = 0; offset < byteCharacters.length; offset += 512) {
+          const slice = byteCharacters.slice(offset, offset + 512);
+          const byteNumbers = new Array(slice.length);
+          for (let i = 0; i < slice.length; i++) {
+            byteNumbers[i] = slice.charCodeAt(i);
+          }
+          const byteArray = new Uint8Array(byteNumbers);
+          byteArrays.push(byteArray);
+        }
+        blob = new Blob(byteArrays, { type: mimeType });
+      } else {
+        const proxyUrl = `/api/proxy-image?url=${encodeURIComponent(url)}`;
+        const response = await fetch(proxyUrl);
+        if (!response.ok) throw new Error("Failed to fetch image");
+        blob = await response.blob();
+      }
       
       const reader = new FileReader();
       reader.readAsDataURL(blob);
-      reader.onloadend = async () => {
-        const base64data = reader.result as string;
-        const fileName = `zhiyou-art-${Date.now()}.png`;
-        const storageRef = ref(storage, `users/${user.uid}/images/${fileName}`);
-        
-        await uploadString(storageRef, base64data, 'data_url');
-        alert("Gambar berhasil disimpan ke Firebase Storage!");
-      };
+      await new Promise<void>((resolve, reject) => {
+        reader.onloadend = async () => {
+          try {
+            const base64data = reader.result as string;
+            const fileName = `zhiyou-art-${Date.now()}.png`;
+            const storageRef = ref(storage, `users/${user.uid}/images/${fileName}`);
+            
+            await uploadString(storageRef, base64data, 'data_url');
+            resolve();
+          } catch (e) {
+            reject(e);
+          }
+        };
+        reader.onerror = reject;
+      });
+      
+      setIsSavingToCloud(false);
+      setTimeout(() => alert("Gambar berhasil disimpan ke Firebase Storage!"), 100);
     } catch (error) {
       console.error("Error saving to cloud:", error);
-      alert("Gagal menyimpan gambar ke cloud.");
+      setIsSavingToCloud(false);
+      setTimeout(() => alert("Gagal menyimpan gambar ke cloud."), 100);
     }
     setOpenMenuIndex(null);
+  };
+
+  const handleSaveAllToCloud = async (urls: string[]) => {
+    if (!user) {
+      alert("Silakan login untuk menyimpan ke cloud.");
+      return;
+    }
+    
+    setIsSavingToCloud(true);
+    
+    try {
+      let savedCount = 0;
+      for (let i = 0; i < urls.length; i++) {
+        const url = urls[i];
+        setSavingProgress(`Menyimpan gambar ${i + 1} dari ${urls.length}...`);
+        try {
+          let blob: Blob;
+          if (url.startsWith('data:')) {
+            const [header, base64Data] = url.split(',');
+            const mimeType = header.split(':')[1].split(';')[0];
+            const byteCharacters = atob(base64Data);
+            const byteArrays = [];
+            for (let offset = 0; offset < byteCharacters.length; offset += 512) {
+              const slice = byteCharacters.slice(offset, offset + 512);
+              const byteNumbers = new Array(slice.length);
+              for (let j = 0; j < slice.length; j++) {
+                byteNumbers[j] = slice.charCodeAt(j);
+              }
+              const byteArray = new Uint8Array(byteNumbers);
+              byteArrays.push(byteArray);
+            }
+            blob = new Blob(byteArrays, { type: mimeType });
+          } else {
+            const proxyUrl = `/api/proxy-image?url=${encodeURIComponent(url)}`;
+            const response = await fetch(proxyUrl);
+            if (!response.ok) throw new Error("Failed to fetch image");
+            blob = await response.blob();
+          }
+          
+          const reader = new FileReader();
+          reader.readAsDataURL(blob);
+          await new Promise<void>((resolve, reject) => {
+            reader.onloadend = async () => {
+              try {
+                const base64data = reader.result as string;
+                const fileName = `zhiyou-art-${Date.now()}-${Math.floor(Math.random() * 1000)}.png`;
+                const storageRef = ref(storage, `users/${user.uid}/images/${fileName}`);
+                await uploadString(storageRef, base64data, 'data_url');
+                savedCount++;
+                resolve();
+              } catch (e) {
+                reject(e);
+              }
+            };
+            reader.onerror = reject;
+          });
+        } catch (e) {
+          console.error("Failed to save one image:", e);
+        }
+      }
+      
+      setIsSavingToCloud(false);
+      if (savedCount > 0) {
+        setTimeout(() => alert(`${savedCount} gambar berhasil disimpan ke Firebase Storage!`), 100);
+      } else {
+        setTimeout(() => alert("Gagal menyimpan gambar ke cloud."), 100);
+      }
+    } catch (error) {
+      console.error("Error saving all to cloud:", error);
+      setIsSavingToCloud(false);
+      setTimeout(() => alert("Gagal menyimpan gambar ke cloud."), 100);
+    }
   };
 
   useEffect(() => {
@@ -640,6 +791,12 @@ export default function ZhiyouApp() {
       // Helper to convert URL to base64 for Gemini
       const getUrlData = async (url: string) => {
         try {
+          if (url.startsWith('data:')) {
+            const [header, base64Data] = url.split(',');
+            const mimeType = header.split(':')[1].split(';')[0];
+            return { data: base64Data, mimeType };
+          }
+          
           const res = await fetch(`/api/proxy-image?url=${encodeURIComponent(url)}`);
           const blob = await res.blob();
           return new Promise<{data: string, mimeType: string} | null>((resolve) => {
@@ -734,6 +891,7 @@ export default function ZhiyouApp() {
       let sources: Source[] = [];
 
       const isImageFeature = isImageFeatureMode && !isQuestion && !isImageAnalysisMode;
+      const isDeveloper = user?.email === 'cipaonly08@gmail.com';
       
       if (isImageFeature) {
         if (!user) {
@@ -746,8 +904,6 @@ export default function ZhiyouApp() {
           setIsLoading(false);
           return;
         }
-
-        const isDeveloper = user?.email === 'cipaonly08@gmail.com';
 
         if (!isDeveloper && (credits === null || credits < 20)) {
           setIsThinking(false);
@@ -821,7 +977,6 @@ export default function ZhiyouApp() {
           }
         }
       } else if (featureMode === 'imageSearch' || selectedModel === 'zhiyou-art') {
-        const isDeveloper = user?.email === 'cipaonly08@gmail.com';
         try {
           const response = await fetch('/api/search-image', {
             method: 'POST',
@@ -1228,14 +1383,25 @@ export default function ZhiyouApp() {
                             transition={{ duration: 0.5, ease: "easeOut" }}
                             className="mb-4"
                           >
-                            {(msg.model === 'zhiyou-art' || msg.model === 'zhiyou-art-2.0') && (
-                              <div className="flex items-center gap-2 mb-2 px-1">
-                                <Wand2 className={`w-4 h-4 ${msg.model === 'zhiyou-art-2.0' ? 'text-pink-500' : 'text-purple-500'}`} />
-                                <span className="text-sm font-semibold text-gray-900">
-                                  {msg.model === 'zhiyou-art-2.0' ? 'Zhiyou Art 2.0' : 'Zhiyou Art'}
-                                </span>
-                              </div>
-                            )}
+                            <div className="flex items-center justify-between mb-2 px-1">
+                              {(msg.model === 'zhiyou-art' || msg.model === 'zhiyou-art-2.0') && (
+                                <div className="flex items-center gap-2">
+                                  <Wand2 className={`w-4 h-4 ${msg.model === 'zhiyou-art-2.0' ? 'text-pink-500' : 'text-purple-500'}`} />
+                                  <span className="text-sm font-semibold text-gray-900">
+                                    {msg.model === 'zhiyou-art-2.0' ? 'Zhiyou Art 2.0' : 'Zhiyou Art'}
+                                  </span>
+                                </div>
+                              )}
+                              {msg.imageResults.length > 1 && (
+                                <button
+                                  onClick={() => handleSaveAllToCloud(msg.imageResults!)}
+                                  className="flex items-center gap-1.5 px-2.5 py-1 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-lg text-xs font-medium transition-colors ml-auto"
+                                >
+                                  <Cloud className="w-3.5 h-3.5" />
+                                  Simpan Semua
+                                </button>
+                              )}
+                            </div>
                             <div className={`grid ${msg.imageResults.length === 1 ? 'grid-cols-1' : 'grid-cols-2'} gap-2`}>
                               {msg.imageResults.map((url, i) => (
                                 <div 
@@ -1845,9 +2011,20 @@ export default function ZhiyouApp() {
                   <Wand2 className="w-5 h-5 text-purple-500" />
                   Zhiyou Art
                 </h3>
-                <button onClick={() => setShowImagesFor(null)} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
-                  <X className="w-5 h-5 text-gray-500" />
-                </button>
+                <div className="flex items-center gap-2">
+                  {showImagesFor.length > 1 && (
+                    <button 
+                      onClick={() => handleSaveAllToCloud(showImagesFor)} 
+                      className="flex items-center gap-2 px-3 py-1.5 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-lg text-sm font-medium transition-colors"
+                    >
+                      <Cloud className="w-4 h-4" />
+                      <span className="hidden sm:inline">Simpan Semua</span>
+                    </button>
+                  )}
+                  <button onClick={() => setShowImagesFor(null)} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
+                    <X className="w-5 h-5 text-gray-500" />
+                  </button>
+                </div>
               </div>
               <div className="overflow-y-auto p-4">
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
@@ -2021,6 +2198,21 @@ export default function ZhiyouApp() {
               </div>
             </motion.div>
           </>
+        )}
+      </AnimatePresence>
+
+      {/* Toast Notification */}
+      <AnimatePresence>
+        {isSavingToCloud && (
+          <motion.div
+            initial={{ opacity: 0, y: 50 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 50 }}
+            className="fixed bottom-24 left-1/2 -translate-x-1/2 bg-gray-900 text-white px-4 py-2 rounded-full shadow-lg flex items-center gap-3 z-[200]"
+          >
+            <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+            <span className="text-sm font-medium">{savingProgress}</span>
+          </motion.div>
         )}
       </AnimatePresence>
     </div>
