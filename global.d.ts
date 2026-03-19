@@ -6,3 +6,7 @@ declare module 'duckduckgo-images-api' {
     retries?: number;
   }): Promise<any[]>;
 }
+
+declare module 'puter' {
+  export const puter: any;
+}
