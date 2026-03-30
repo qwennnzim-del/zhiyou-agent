@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { motion } from 'motion/react';
+import { motion, AnimatePresence } from 'motion/react';
 import { ArrowLeft, Globe, Check, Trash2, AlertTriangle, LogOut, Crown, Star, Zap } from 'lucide-react';
 import Link from 'next/link';
 import { useLanguage } from '../contexts/LanguageContext';
@@ -22,7 +22,17 @@ export default function SettingsPage() {
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [user, setUser] = useState<User | null>(null);
+  const [toastMessage, setToastMessage] = useState<{text: string, type: 'success' | 'error' | 'info'} | null>(null);
   const router = useRouter();
+
+  const showToast = (text: string, type: 'success' | 'error' | 'info' = 'info') => {
+    setToastMessage({ text, type });
+    setTimeout(() => setToastMessage(null), 3000);
+  };
+
+  const handlePlanClick = (planName: string) => {
+    showToast(`Fitur pembayaran untuk paket ${planName} sedang dalam tahap pengembangan.`, 'info');
+  };
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
@@ -98,7 +108,7 @@ export default function SettingsPage() {
                 <li className="flex items-center gap-2"><Check className="w-4 h-4 text-green-500" /> Resolusi HD</li>
                 <li className="flex items-center gap-2"><Check className="w-4 h-4 text-green-500" /> Prioritas Standar</li>
               </ul>
-              <button className="w-full py-2 bg-blue-50 text-blue-600 font-semibold rounded-xl hover:bg-blue-100 transition-colors">Pilih Standar</button>
+              <button onClick={() => handlePlanClick('Standar')} className="w-full py-2 bg-blue-50 text-blue-600 font-semibold rounded-xl hover:bg-blue-100 transition-colors">Pilih Standar</button>
             </div>
 
             {/* Pro Plan */}
@@ -116,7 +126,7 @@ export default function SettingsPage() {
                 <li className="flex items-center gap-2"><Check className="w-4 h-4 text-green-500" /> Prioritas Tinggi</li>
                 <li className="flex items-center gap-2"><Check className="w-4 h-4 text-green-500" /> Akses Model Terbaru</li>
               </ul>
-              <button className="w-full py-2 bg-gradient-to-r from-amber-500 to-orange-500 text-white font-semibold rounded-xl hover:opacity-90 transition-opacity shadow-md">Pilih Pro</button>
+              <button onClick={() => handlePlanClick('Pro')} className="w-full py-2 bg-gradient-to-r from-amber-500 to-orange-500 text-white font-semibold rounded-xl hover:opacity-90 transition-opacity shadow-md">Pilih Pro</button>
             </div>
 
             {/* Ultra Plan */}
@@ -132,7 +142,7 @@ export default function SettingsPage() {
                 <li className="flex items-center gap-2"><Check className="w-4 h-4 text-green-500" /> Prioritas Tertinggi</li>
                 <li className="flex items-center gap-2"><Check className="w-4 h-4 text-green-500" /> Dukungan VIP 24/7</li>
               </ul>
-              <button className="w-full py-2 bg-purple-50 text-purple-600 font-semibold rounded-xl hover:bg-purple-100 transition-colors">Pilih Ultra</button>
+              <button onClick={() => handlePlanClick('Ultra')} className="w-full py-2 bg-purple-50 text-purple-600 font-semibold rounded-xl hover:bg-purple-100 transition-colors">Pilih Ultra</button>
             </div>
           </div>
           <div className="px-6 pb-4 text-xs text-center text-gray-400">
@@ -281,6 +291,24 @@ export default function SettingsPage() {
           </motion.div>
         )}
       </main>
+
+      {/* Toast Notification */}
+      {/* @ts-ignore */}
+      <AnimatePresence>
+        {toastMessage && (
+          <motion.div
+            initial={{ opacity: 0, y: 50, scale: 0.9 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.9, y: 20 }}
+            className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 px-4 py-3 bg-gray-900 text-white rounded-2xl shadow-2xl"
+          >
+            {toastMessage.type === 'success' && <Check className="w-5 h-5 text-green-400" />}
+            {toastMessage.type === 'error' && <AlertTriangle className="w-5 h-5 text-red-400" />}
+            {toastMessage.type === 'info' && <div className="w-2 h-2 rounded-full bg-blue-400" />}
+            <span className="text-sm font-medium">{toastMessage.text}</span>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

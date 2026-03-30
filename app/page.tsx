@@ -89,18 +89,23 @@ export default function ZhiyouApp() {
   const [aspectRatio, setAspectRatio] = useState('1:1');
   const [showSourcesFor, setShowSourcesFor] = useState<Source[] | null>(null);
   const [showImagesFor, setShowImagesFor] = useState<string[] | null>(null);
+  const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [copiedMessageIndex, setCopiedMessageIndex] = useState<number | null>(null);
   const [likedMessageIndex, setLikedMessageIndex] = useState<number | null>(null);
   const [sharedMessageIndex, setSharedMessageIndex] = useState<number | null>(null);
   const [loadingTextIndex, setLoadingTextIndex] = useState(0);
   const [currentPrompt, setCurrentPrompt] = useState('');
   const [isImageAnalysisMode, setIsImageAnalysisMode] = useState(false);
-  const [selectedImageForActions, setSelectedImageForActions] = useState<string | null>(null);
-  const [isImageActionSheetOpen, setIsImageActionSheetOpen] = useState(false);
   const [openMenuIndex, setOpenMenuIndex] = useState<number | null>(null);
   const [isSavingToCloud, setIsSavingToCloud] = useState(false);
   const [savingProgress, setSavingProgress] = useState('');
+  const [toastMessage, setToastMessage] = useState<{text: string, type: 'success' | 'error' | 'info'} | null>(null);
   const { t, language } = useLanguage();
+
+  const showToast = (text: string, type: 'success' | 'error' | 'info' = 'info') => {
+    setToastMessage({ text, type });
+    setTimeout(() => setToastMessage(null), 3000);
+  };
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatRef = useRef<any>(null);
@@ -137,6 +142,9 @@ export default function ZhiyouApp() {
         }
         
         blob = new Blob(byteArrays, { type: mimeType });
+      } else if (url.startsWith('blob:')) {
+        const response = await fetch(url);
+        blob = await response.blob();
       } else {
         // Handle external URL via proxy
         const proxyUrl = `/api/proxy-image?url=${encodeURIComponent(url)}`;
@@ -168,7 +176,7 @@ export default function ZhiyouApp() {
 
       // Add Watermark
       const margin = canvas.width * 0.04;
-      const fontSize = Math.max(14, Math.floor(canvas.width * 0.025));
+      const fontSize = Math.max(18, Math.floor(canvas.width * 0.035));
       const logoSize = fontSize * 1.5;
       
       const watermarkText = "Zhiyou AI";
@@ -220,11 +228,12 @@ export default function ZhiyouApp() {
         document.body.removeChild(a);
         URL.revokeObjectURL(finalUrl);
         URL.revokeObjectURL(objectUrl);
+        showToast("Gambar berhasil diunduh!", 'success');
       }, 'image/jpeg', 0.85);
 
     } catch (error) {
       console.error("Error downloading image:", error);
-      alert("Gagal mengunduh gambar.");
+      showToast("Gagal mengunduh gambar.", 'error');
     }
     setOpenMenuIndex(null);
   };
@@ -238,17 +247,12 @@ export default function ZhiyouApp() {
         });
       } else {
         navigator.clipboard.writeText(url);
-        alert("URL gambar disalin ke clipboard!");
+        showToast("URL gambar disalin ke clipboard!", 'success');
       }
     } catch (err) {
       console.error("Share failed:", err);
     }
     setOpenMenuIndex(null);
-  };
-
-  const handleSelectImageForChat = (url: string) => {
-    setSelectedImageForActions(url);
-    setIsImageActionSheetOpen(true);
   };
 
   const startAnalysis = async (url: string) => {
@@ -272,6 +276,9 @@ export default function ZhiyouApp() {
         }
         
         blob = new Blob(byteArrays, { type: mimeType });
+      } else if (url.startsWith('blob:')) {
+        const response = await fetch(url);
+        blob = await response.blob();
       } else {
         const proxyUrl = `/api/proxy-image?url=${encodeURIComponent(url)}`;
         const response = await fetch(proxyUrl);
@@ -292,7 +299,7 @@ export default function ZhiyouApp() {
         
         setAttachments(prev => [...prev, newAttachment]);
         setIsImageAnalysisMode(true);
-        setIsImageActionSheetOpen(false);
+        setShowImagesFor(null);
         if (textareaRef.current) {
           textareaRef.current.focus();
         }
@@ -305,7 +312,7 @@ export default function ZhiyouApp() {
 
   const handleSaveToZhiyouFirebase = async (url: string) => {
     if (!user) {
-      alert("Silakan login untuk menyimpan.");
+      showToast("Silakan login untuk menyimpan.", 'error');
       return;
     }
     
@@ -327,17 +334,16 @@ export default function ZhiyouApp() {
         prompt: currentPrompt
       });
       
-      alert("Gambar berhasil disimpan ke Zhiyou Firebase!");
+      showToast("Gambar berhasil disimpan ke Zhiyou Firebase!", 'success');
     } catch (error) {
       console.error("Error saving to Firebase:", error);
-      alert("Gagal menyimpan gambar.");
+      showToast("Gagal menyimpan gambar.", 'error');
     }
-    setIsImageActionSheetOpen(false);
   };
 
   const handleSaveToCloud = async (url: string) => {
     if (!user) {
-      alert("Silakan login untuk menyimpan ke cloud.");
+      showToast("Silakan login untuk menyimpan ke cloud.", 'error');
       return;
     }
     
@@ -361,6 +367,9 @@ export default function ZhiyouApp() {
           byteArrays.push(byteArray);
         }
         blob = new Blob(byteArrays, { type: mimeType });
+      } else if (url.startsWith('blob:')) {
+        const response = await fetch(url);
+        blob = await response.blob();
       } else {
         const proxyUrl = `/api/proxy-image?url=${encodeURIComponent(url)}`;
         const response = await fetch(proxyUrl);
@@ -387,85 +396,13 @@ export default function ZhiyouApp() {
       });
       
       setIsSavingToCloud(false);
-      setTimeout(() => alert("Gambar berhasil disimpan ke Firebase Storage!"), 100);
+      showToast("Gambar berhasil disimpan ke Firebase Storage!", 'success');
     } catch (error) {
       console.error("Error saving to cloud:", error);
       setIsSavingToCloud(false);
-      setTimeout(() => alert("Gagal menyimpan gambar ke cloud."), 100);
+      showToast("Gagal menyimpan gambar ke cloud.", 'error');
     }
     setOpenMenuIndex(null);
-  };
-
-  const handleSaveAllToCloud = async (urls: string[]) => {
-    if (!user) {
-      alert("Silakan login untuk menyimpan ke cloud.");
-      return;
-    }
-    
-    setIsSavingToCloud(true);
-    
-    try {
-      let savedCount = 0;
-      for (let i = 0; i < urls.length; i++) {
-        const url = urls[i];
-        setSavingProgress(`Menyimpan gambar ${i + 1} dari ${urls.length}...`);
-        try {
-          let blob: Blob;
-          if (url.startsWith('data:')) {
-            const [header, base64Data] = url.split(',');
-            const mimeType = header.split(':')[1].split(';')[0];
-            const byteCharacters = atob(base64Data);
-            const byteArrays = [];
-            for (let offset = 0; offset < byteCharacters.length; offset += 512) {
-              const slice = byteCharacters.slice(offset, offset + 512);
-              const byteNumbers = new Array(slice.length);
-              for (let j = 0; j < slice.length; j++) {
-                byteNumbers[j] = slice.charCodeAt(j);
-              }
-              const byteArray = new Uint8Array(byteNumbers);
-              byteArrays.push(byteArray);
-            }
-            blob = new Blob(byteArrays, { type: mimeType });
-          } else {
-            const proxyUrl = `/api/proxy-image?url=${encodeURIComponent(url)}`;
-            const response = await fetch(proxyUrl);
-            if (!response.ok) throw new Error("Failed to fetch image");
-            blob = await response.blob();
-          }
-          
-          const reader = new FileReader();
-          reader.readAsDataURL(blob);
-          await new Promise<void>((resolve, reject) => {
-            reader.onloadend = async () => {
-              try {
-                const base64data = reader.result as string;
-                const fileName = `zhiyou-art-${Date.now()}-${Math.floor(Math.random() * 1000)}.png`;
-                const storageRef = ref(storage, `users/${user.uid}/images/${fileName}`);
-                await uploadString(storageRef, base64data, 'data_url');
-                savedCount++;
-                resolve();
-              } catch (e) {
-                reject(e);
-              }
-            };
-            reader.onerror = reject;
-          });
-        } catch (e) {
-          console.error("Failed to save one image:", e);
-        }
-      }
-      
-      setIsSavingToCloud(false);
-      if (savedCount > 0) {
-        setTimeout(() => alert(`${savedCount} gambar berhasil disimpan ke Firebase Storage!`), 100);
-      } else {
-        setTimeout(() => alert("Gagal menyimpan gambar ke cloud."), 100);
-      }
-    } catch (error) {
-      console.error("Error saving all to cloud:", error);
-      setIsSavingToCloud(false);
-      setTimeout(() => alert("Gagal menyimpan gambar ke cloud."), 100);
-    }
   };
 
   useEffect(() => {
@@ -904,61 +841,45 @@ export default function ZhiyouApp() {
           setIsLoading(false);
           return;
         }
-
-        if (!isDeveloper && (credits === null || credits < 20)) {
-          setIsThinking(false);
-          setMessages(prev => {
-            const newMessages = [...prev];
-            newMessages[newMessages.length - 1].text = "Penggunaan free tier kredit anda sudah habis, anda bisa berlangganan untuk fitur \"Pro\" \"Standar\" dan \"Ultra\" di menu setting.";
-            return newMessages;
-          });
-          setIsLoading(false);
-          return;
-        }
-
-        if (!isDeveloper) {
-          // Deduct 20 credits
-          const userRef = doc(db, 'users', user.uid);
-          await setDoc(userRef, { credits: credits! - 20 }, { merge: true });
-          setCredits(prev => prev !== null ? prev - 20 : null);
-        }
+        // Image generation is now free, no credit deduction
       }
 
       if (featureMode === 'image' || selectedModel === 'zhiyou-art-2.0') {
         if (!user) return;
         
         try {
-          let width = 1024;
-          let height = 1024;
-          if (aspectRatio === '16:9') { width = 1024; height = 576; }
-          else if (aspectRatio === '9:16') { width = 576; height = 1024; }
-          else if (aspectRatio === '4:3') { width = 1024; height = 768; }
-          else if (aspectRatio === '3:4') { width = 768; height = 1024; }
-
-          const seed = Math.floor(Math.random() * 1000000);
-          
-          // Call the new API route
-          const response = await fetch('/api/generate-image', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-              prompt: finalPrompt, 
-              model: 'flux', // Default to flux, can be made dynamic
-              width, 
-              height, 
-              seed 
-            })
+          const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash-image',
+            contents: {
+              parts: [
+                {
+                  text: finalPrompt,
+                },
+              ],
+            },
+            config: {
+              imageConfig: {
+                aspectRatio: aspectRatio,
+              },
+            },
           });
-          
-          const data = await response.json();
-          
-          if (!response.ok) throw new Error(data.error || 'Failed to generate image');
+
+          const imageResults: string[] = [];
+          for (const part of response.candidates?.[0]?.content?.parts || []) {
+            if (part.inlineData) {
+              const base64EncodeString = part.inlineData.data;
+              const imageUrl = `data:${part.inlineData.mimeType || 'image/png'};base64,${base64EncodeString}`;
+              imageResults.push(imageUrl);
+            }
+          }
+
+          if (imageResults.length === 0) throw new Error('Gagal membuat gambar');
           
           setIsThinking(false);
           setMessages(prev => {
             const newMessages = [...prev];
             newMessages[newMessages.length - 1].text = t('imageGenSuccess');
-            newMessages[newMessages.length - 1].imageResults = [data.imageUrl];
+            newMessages[newMessages.length - 1].imageResults = imageResults;
             newMessages[newMessages.length - 1].model = selectedModel;
             return newMessages;
           });
@@ -969,12 +890,6 @@ export default function ZhiyouApp() {
             newMessages[newMessages.length - 1].text = "Maaf, terjadi kesalahan saat membuat gambar: " + error.message;
             return newMessages;
           });
-          // Refund credits on failure
-          if (!isDeveloper && user) {
-            const userRef = doc(db, 'users', user.uid);
-            await setDoc(userRef, { credits: credits! }, { merge: true });
-            setCredits(credits);
-          }
         }
       } else if (featureMode === 'imageSearch' || selectedModel === 'zhiyou-art') {
         try {
@@ -1011,12 +926,6 @@ export default function ZhiyouApp() {
             newMessages[newMessages.length - 1].text = "Maaf, terjadi kesalahan saat mencari gambar: " + error.message;
             return newMessages;
           });
-          // Refund credits on failure
-          if (!isDeveloper && user) {
-            const userRef = doc(db, 'users', user.uid);
-            await setDoc(userRef, { credits: credits! }, { merge: true });
-            setCredits(credits);
-          }
         }
       } else {
         if (selectedModel === 'zhiyou-3') {
@@ -1149,16 +1058,10 @@ export default function ZhiyouApp() {
       </AnimatePresence>
 
       {/* Sidebar */}
-      <AnimatePresence>
-        {(isSidebarOpen || (typeof window !== 'undefined' && window.innerWidth >= 768)) && (
-          <motion.aside
-            initial={{ x: '-100%' }}
-            animate={{ x: 0 }}
-            exit={{ x: '-100%' }}
-            transition={{ type: 'spring', bounce: 0, duration: 0.3 }}
-            className={`fixed md:static inset-y-0 left-0 w-72 bg-[#f9f9f9] border-r border-gray-200 z-50 flex flex-col ${isSidebarOpen ? 'block' : 'hidden md:flex'}`}
-          >
-            <div className="p-6 flex items-center gap-3 border-b border-gray-100 mb-2">
+      <aside
+        className={`fixed md:static inset-y-0 left-0 w-72 md:w-80 bg-[#f9f9f9] border-r border-gray-200 z-50 flex flex-col transition-transform duration-300 ease-in-out ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}
+      >
+        <div className="p-6 flex items-center gap-3 border-b border-gray-100 mb-2">
               <ZhiyouLogo className="w-8 h-8" />
               <span className="text-xl font-bold tracking-tight text-gray-800 italic font-serif">Zhiyou AI</span>
               <button onClick={() => setIsSidebarOpen(false)} className="md:hidden ml-auto p-2 hover:bg-gray-200 active:scale-90 rounded-full transition-all">
@@ -1223,9 +1126,7 @@ export default function ZhiyouApp() {
                 <HelpCircle className="w-4 h-4" /> {t('help')}
               </Link>
             </div>
-          </motion.aside>
-        )}
-      </AnimatePresence>
+          </aside>
 
       {/* Main Content */}
       <div className="flex-1 flex flex-col h-full relative min-w-0">
@@ -1287,16 +1188,16 @@ export default function ZhiyouApp() {
                 initial={{ scale: 0.8, opacity: 0 }}
                 animate={{ scale: 1, opacity: 1 }}
                 transition={{ type: "spring", bounce: 0.5, duration: 0.8 }}
-                className="w-16 h-16 rounded-3xl bg-white border border-gray-100 flex items-center justify-center mb-6 shadow-xl shadow-blue-500/10"
+                className="w-16 h-16 sm:w-20 sm:h-20 rounded-3xl bg-white border border-gray-100 flex items-center justify-center mb-6 shadow-xl shadow-blue-500/10"
               >
-                <ZhiyouLogo className="w-10 h-10" />
+                <ZhiyouLogo className="w-10 h-10 sm:w-12 sm:h-12" />
               </motion.div>
               
               <motion.h1 
                 initial={{ y: 20, opacity: 0 }}
                 animate={{ y: 0, opacity: 1 }}
                 transition={{ delay: 0.1, duration: 0.5 }}
-                className="text-4xl sm:text-5xl font-semibold mb-4 text-center tracking-tight"
+                className="text-4xl sm:text-5xl md:text-6xl font-semibold mb-4 text-center tracking-tight"
               >
                 {t('welcome')}, <span className="text-transparent bg-clip-text bg-gradient-to-r from-purple-600 to-blue-600">{user?.displayName?.split(' ')[0] || 'User'}</span>
               </motion.h1>
@@ -1392,15 +1293,6 @@ export default function ZhiyouApp() {
                                   </span>
                                 </div>
                               )}
-                              {msg.imageResults.length > 1 && (
-                                <button
-                                  onClick={() => handleSaveAllToCloud(msg.imageResults!)}
-                                  className="flex items-center gap-1.5 px-2.5 py-1 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-lg text-xs font-medium transition-colors ml-auto"
-                                >
-                                  <Cloud className="w-3.5 h-3.5" />
-                                  Simpan Semua
-                                </button>
-                              )}
                             </div>
                             <div className={`grid ${msg.imageResults.length === 1 ? 'grid-cols-1' : 'grid-cols-2'} gap-2`}>
                               {msg.imageResults.map((url, i) => (
@@ -1409,7 +1301,10 @@ export default function ZhiyouApp() {
                                   className="relative group rounded-2xl overflow-hidden border border-gray-100 shadow-sm bg-gray-50"
                                 >
                                   <div 
-                                    onClick={() => handleSelectImageForChat(url)}
+                                    onClick={() => {
+                                      setShowImagesFor(msg.imageResults!);
+                                      setCurrentImageIndex(i);
+                                    }}
                                     className="aspect-square cursor-pointer overflow-hidden"
                                   >
                                     <img 
@@ -1428,30 +1323,9 @@ export default function ZhiyouApp() {
                                     <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors" />
                                   </div>
                                   
-                                  <div className="absolute bottom-2 left-2 right-2 flex items-center justify-between opacity-0 group-hover:opacity-100 transition-opacity">
-                                    <button 
-                                      onClick={() => handleSelectImageForChat(url)}
-                                      className="p-2 bg-white/90 backdrop-blur-sm rounded-xl text-blue-600 shadow-sm hover:bg-white transition-all active:scale-90"
-                                      title="Analisis Gambar"
-                                    >
-                                      <Brain className="w-4 h-4" />
-                                    </button>
-                                    
-                                    <div className="flex gap-1">
-                                      <button 
-                                        onClick={() => setShowImagesFor(msg.imageResults!)}
-                                        className="p-2 bg-white/90 backdrop-blur-sm rounded-xl text-gray-700 shadow-sm hover:bg-white transition-all active:scale-90"
-                                        title="Lihat Penuh"
-                                      >
-                                        <Maximize2 className="w-4 h-4" />
-                                      </button>
-                                      <button 
-                                        onClick={() => handleSelectImageForChat(url)}
-                                        className="p-2 bg-white/90 backdrop-blur-sm rounded-xl text-gray-700 shadow-sm hover:bg-white transition-all active:scale-90"
-                                        title="Opsi Lainnya"
-                                      >
-                                        <MoreHorizontal className="w-4 h-4" />
-                                      </button>
+                                  <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+                                    <div className="p-3 bg-black/50 backdrop-blur-sm rounded-full text-white shadow-lg">
+                                      <Maximize2 className="w-6 h-6" />
                                     </div>
                                   </div>
                                 </div>
@@ -1706,7 +1580,7 @@ export default function ZhiyouApp() {
                           animate={{ opacity: 1, y: 0, scale: 1 }}
                           exit={{ opacity: 0, y: 10, scale: 0.95 }}
                           transition={{ duration: 0.15 }}
-                          className="absolute bottom-full left-0 mb-2 bg-white rounded-2xl shadow-xl border border-gray-100 p-1.5 flex flex-col gap-0.5 z-50 min-w-[160px]"
+                          className="absolute bottom-full left-0 mb-2 bg-white rounded-2xl shadow-xl border border-gray-100 p-1.5 flex flex-col gap-0.5 z-50 min-w-[160px] sm:min-w-[200px]"
                         >
                           <button onClick={() => triggerFileInput('image/*')} className="flex items-center gap-3 px-3 py-2.5 hover:bg-gray-50 active:scale-[0.98] rounded-xl text-sm font-medium text-gray-700 transition-all text-left">
                             <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center">
@@ -1746,29 +1620,27 @@ export default function ZhiyouApp() {
                             animate={{ opacity: 1, y: 0, scale: 1 }}
                             exit={{ opacity: 0, y: 10, scale: 0.95 }}
                             transition={{ duration: 0.15 }}
-                            className="absolute bottom-full left-0 mb-2 bg-white rounded-2xl shadow-xl border border-gray-100 p-1.5 flex flex-col gap-0.5 z-50 min-w-[200px]"
+                            className="absolute bottom-full left-0 mb-2 bg-white rounded-2xl shadow-xl border border-gray-100 p-1.5 flex flex-col gap-0.5 z-50 min-w-[200px] sm:min-w-[240px]"
                           >
                             <button onClick={() => { setFeatureMode('image'); setSelectedModel('zhiyou-art-2.0'); setIsFeatureMenuOpen(false); }} className="flex items-center gap-3 px-3 py-2.5 hover:bg-gray-50 active:scale-[0.98] rounded-xl text-sm font-medium text-gray-700 transition-all text-left">
                               <div className="w-8 h-8 rounded-lg bg-pink-50 flex items-center justify-center relative">
                                 <ImageIcon className="w-4 h-4 text-pink-500" />
-                                <Crown className="w-2.5 h-2.5 absolute -top-1 -right-1 text-pink-500" />
                               </div>
                               <div className="flex flex-col">
                                 <div className="flex items-center gap-2">
                                   <span>{t('featureGenerateImage')}</span>
-                                  <span className="px-1.5 py-0.5 bg-amber-100 text-amber-700 text-[8px] font-bold rounded-full uppercase tracking-wider">VIP</span>
+                                  <span className="px-1.5 py-0.5 bg-green-100 text-green-700 text-[8px] font-bold rounded-full uppercase tracking-wider">FREE</span>
                                 </div>
                               </div>
                             </button>
                             <button onClick={() => { setFeatureMode('imageSearch'); setSelectedModel('zhiyou-art'); setIsFeatureMenuOpen(false); }} className="flex items-center gap-3 px-3 py-2.5 hover:bg-gray-50 active:scale-[0.98] rounded-xl text-sm font-medium text-gray-700 transition-all text-left">
                               <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center relative">
                                 <Search className="w-4 h-4 text-blue-500" />
-                                <Crown className="w-2.5 h-2.5 absolute -top-1 -right-1 text-blue-500" />
                               </div>
                               <div className="flex flex-col">
                                 <div className="flex items-center gap-2">
                                   <span>{t('featureSearchImage')}</span>
-                                  <span className="px-1.5 py-0.5 bg-purple-100 text-purple-700 text-[8px] font-bold rounded-full uppercase tracking-wider">VIP</span>
+                                  <span className="px-1.5 py-0.5 bg-green-100 text-green-700 text-[8px] font-bold rounded-full uppercase tracking-wider">FREE</span>
                                 </div>
                               </div>
                             </button>
@@ -1778,7 +1650,7 @@ export default function ZhiyouApp() {
                               </div>
                               {t('featureDeepResearch')}
                             </button>
-                            <button onClick={() => { alert(t('featureComingSoon')); setIsFeatureMenuOpen(false); }} className="flex items-center gap-3 px-3 py-2.5 hover:bg-gray-50 active:scale-[0.98] rounded-xl text-sm font-medium text-gray-700 transition-all text-left">
+                            <button onClick={() => { showToast(t('featureComingSoon'), 'info'); setIsFeatureMenuOpen(false); }} className="flex items-center gap-3 px-3 py-2.5 hover:bg-gray-50 active:scale-[0.98] rounded-xl text-sm font-medium text-gray-700 transition-all text-left">
                               <div className="w-8 h-8 rounded-lg bg-emerald-50 flex items-center justify-center">
                                 <BookOpen className="w-4 h-4 text-emerald-500" />
                               </div>
@@ -1816,97 +1688,6 @@ export default function ZhiyouApp() {
         </div>
       </div>
 
-      {/* Image Action Sheet (Bottom Sidebar) */}
-      <AnimatePresence>
-        {isImageActionSheetOpen && selectedImageForActions && (
-          <div className="fixed inset-0 z-[110] flex items-end justify-center bg-black/40 backdrop-blur-sm">
-            <motion.div
-              initial={{ y: '100%' }}
-              animate={{ y: 0 }}
-              exit={{ y: '100%' }}
-              transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-              className="bg-white w-full max-w-2xl rounded-t-[32px] p-6 shadow-2xl flex flex-col gap-6"
-            >
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center">
-                    <ImageIcon className="w-5 h-5 text-blue-500" />
-                  </div>
-                  <div>
-                    <h3 className="text-lg font-bold text-gray-900">Opsi Gambar</h3>
-                    <p className="text-xs text-gray-500">Pilih tindakan untuk gambar ini</p>
-                  </div>
-                </div>
-                <button 
-                  onClick={() => setIsImageActionSheetOpen(false)}
-                  className="p-2 hover:bg-gray-100 rounded-full transition-colors"
-                >
-                  <X className="w-6 h-6 text-gray-400" />
-                </button>
-              </div>
-
-              <div className="flex flex-col sm:flex-row gap-4">
-                <div className="w-full sm:w-48 aspect-square rounded-2xl overflow-hidden border border-gray-100 shadow-inner bg-gray-50">
-                  <img 
-                    src={selectedImageForActions} 
-                    alt="Selected" 
-                    className="w-full h-full object-cover"
-                    onError={(e) => {
-                      const target = e.target as HTMLImageElement;
-                      target.src = `/api/proxy-image?url=${encodeURIComponent(selectedImageForActions)}`;
-                    }}
-                  />
-                </div>
-
-                <div className="flex-1 grid grid-cols-2 gap-3">
-                  <button 
-                    onClick={() => startAnalysis(selectedImageForActions)}
-                    className="flex flex-col items-center justify-center gap-2 p-4 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl transition-all active:scale-95 shadow-lg shadow-blue-200"
-                  >
-                    <Brain className="w-6 h-6" />
-                    <span className="text-sm font-bold">Analisis</span>
-                  </button>
-                  
-                  <button 
-                    onClick={() => handleDownload(selectedImageForActions)}
-                    className="flex flex-col items-center justify-center gap-2 p-4 bg-gray-50 hover:bg-gray-100 text-gray-700 rounded-2xl transition-all active:scale-95 border border-gray-100"
-                  >
-                    <Download className="w-6 h-6" />
-                    <span className="text-sm font-bold">Unduh</span>
-                  </button>
-
-                  <button 
-                    onClick={() => handleShareImage(selectedImageForActions)}
-                    className="flex flex-col items-center justify-center gap-2 p-4 bg-gray-50 hover:bg-gray-100 text-gray-700 rounded-2xl transition-all active:scale-95 border border-gray-100"
-                  >
-                    <Share2 className="w-6 h-6" />
-                    <span className="text-sm font-bold">Bagikan</span>
-                  </button>
-
-                  <button 
-                    onClick={() => handleSaveToZhiyouFirebase(selectedImageForActions)}
-                    className="flex flex-col items-center justify-center gap-2 p-4 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-2xl transition-all active:scale-95 border border-emerald-100"
-                  >
-                    <Cloud className="w-6 h-6" />
-                    <span className="text-sm font-bold">Simpan Cloud</span>
-                  </button>
-                </div>
-              </div>
-
-              <div className="bg-gray-50 rounded-2xl p-4 border border-gray-100">
-                <div className="flex items-center gap-2 mb-1">
-                  <HelpCircle className="w-3.5 h-3.5 text-gray-400" />
-                  <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Info Kredit</span>
-                </div>
-                <p className="text-xs text-gray-600 leading-relaxed">
-                  Menyimpan ke <span className="font-bold text-blue-600">Zhiyou Firebase</span> membantu menghemat kredit pencarian Anda di masa mendatang.
-                </p>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
       {/* Delete Chat Confirmation Dialog */}
       <AnimatePresence>
         {chatToDelete && (
@@ -1941,20 +1722,14 @@ export default function ZhiyouApp() {
       {/* Sources Slidebar */}
       <AnimatePresence>
         {showSourcesFor && (
-          <>
-            <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setShowSourcesFor(null)}
-              className="fixed inset-0 bg-black/20 z-[100] backdrop-blur-sm"
-            />
+          <div className="fixed inset-0 z-[100] flex items-end md:items-center justify-center bg-black/20 backdrop-blur-sm" onClick={() => setShowSourcesFor(null)}>
             <motion.div
+              onClick={(e) => e.stopPropagation()}
               initial={{ y: '100%' }}
               animate={{ y: 0 }}
               exit={{ y: '100%' }}
               transition={{ type: 'spring', bounce: 0, duration: 0.4 }}
-              className="fixed bottom-0 left-0 right-0 bg-white rounded-t-3xl z-[101] max-h-[80vh] flex flex-col shadow-[0_-10px_40px_rgba(0,0,0,0.1)]"
+              className="w-full md:max-w-md bg-white rounded-t-3xl md:rounded-3xl max-h-[80vh] flex flex-col shadow-[0_-10px_40px_rgba(0,0,0,0.1)] md:shadow-2xl"
             >
               <div className="flex items-center justify-between p-4 border-b border-gray-100">
                 <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
@@ -1984,139 +1759,117 @@ export default function ZhiyouApp() {
                 ))}
               </div>
             </motion.div>
-          </>
+          </div>
         )}
       </AnimatePresence>
 
       {/* Image Gallery Slidebar */}
       <AnimatePresence>
         {showImagesFor && (
-          <>
-            <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setShowImagesFor(null)}
-              className="fixed inset-0 bg-black/40 z-[100] backdrop-blur-md"
-            />
-            <motion.div
-              initial={{ y: '100%' }}
-              animate={{ y: 0 }}
-              exit={{ y: '100%' }}
-              transition={{ type: 'spring', bounce: 0, duration: 0.4 }}
-              className="fixed bottom-0 left-0 right-0 bg-white rounded-t-3xl z-[101] max-h-[90vh] flex flex-col shadow-[0_-10px_40px_rgba(0,0,0,0.2)]"
-            >
-              <div className="flex items-center justify-between p-4 border-b border-gray-100">
-                <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
-                  <Wand2 className="w-5 h-5 text-purple-500" />
-                  Zhiyou Art
-                </h3>
-                <div className="flex items-center gap-2">
-                  {showImagesFor.length > 1 && (
-                    <button 
-                      onClick={() => handleSaveAllToCloud(showImagesFor)} 
-                      className="flex items-center gap-2 px-3 py-1.5 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-lg text-sm font-medium transition-colors"
-                    >
-                      <Cloud className="w-4 h-4" />
-                      <span className="hidden sm:inline">Simpan Semua</span>
-                    </button>
-                  )}
-                  <button onClick={() => setShowImagesFor(null)} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
-                    <X className="w-5 h-5 text-gray-500" />
+          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 backdrop-blur-md" onClick={() => setShowImagesFor(null)}>
+            <button onClick={() => setShowImagesFor(null)} className="absolute top-4 right-4 p-2 bg-white/10 hover:bg-white/20 rounded-full transition-colors z-50">
+              <X className="w-6 h-6 text-white" />
+            </button>
+            
+            <div className="relative w-full h-full flex items-center justify-center p-4 md:p-12" onClick={(e) => e.stopPropagation()}>
+              {showImagesFor.length > 1 && (
+                <button 
+                  onClick={() => setCurrentImageIndex((prev) => (prev > 0 ? prev - 1 : showImagesFor.length - 1))}
+                  className="absolute left-4 md:left-8 p-3 bg-white/10 hover:bg-white/20 rounded-full transition-colors z-50"
+                >
+                  <ChevronDown className="w-6 h-6 text-white rotate-90" />
+                </button>
+              )}
+
+              <div className="relative max-w-4xl max-h-full flex flex-col items-center justify-center">
+                <img 
+                  src={showImagesFor[currentImageIndex] || 'https://picsum.photos/seed/error/800/800'} 
+                  alt={`Result ${currentImageIndex + 1}`} 
+                  className="max-w-full max-h-[80vh] object-contain rounded-lg shadow-2xl"
+                  onError={(e) => {
+                    const target = e.target as HTMLImageElement;
+                    if (showImagesFor[currentImageIndex] && !target.src.includes('/api/proxy-image')) {
+                      target.src = `/api/proxy-image?url=${encodeURIComponent(showImagesFor[currentImageIndex])}`;
+                    }
+                  }}
+                />
+                
+                <div className="absolute top-4 right-4">
+                  <button 
+                    onClick={() => setOpenMenuIndex(openMenuIndex === currentImageIndex ? null : currentImageIndex)}
+                    className="p-2 bg-black/50 hover:bg-black/70 rounded-full text-white transition-colors backdrop-blur-sm"
+                  >
+                    <MoreHorizontal className="w-5 h-5" />
                   </button>
-                </div>
-              </div>
-              <div className="overflow-y-auto p-4">
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-                  {showImagesFor.map((img, idx) => (
-                    <motion.div 
-                      key={idx}
-                      initial={{ opacity: 0, scale: 0.9 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      transition={{ delay: idx * 0.05 }}
-                      className="flex flex-col gap-2"
-                    >
-                      <div className="relative aspect-square rounded-xl overflow-hidden border border-gray-100 shadow-sm group bg-gray-50">
-                        <img 
-                          src={img || 'https://picsum.photos/seed/error/400/400'} 
-                          alt={`Result ${idx + 1}`} 
-                          className="w-full h-full object-cover" 
-                          onError={(e) => {
-                            const target = e.target as HTMLImageElement;
-                            if (img && !target.src.includes('/api/proxy-image')) {
-                              target.src = `/api/proxy-image?url=${encodeURIComponent(img)}`;
-                            } else {
-                              target.src = `https://picsum.photos/seed/zhiyou-modal-${idx}/400/400`;
-                            }
-                          }}
-                        />
-                        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center">
-                          <a 
-                            href={img} 
-                            target="_blank" 
-                            rel="noopener noreferrer"
-                            className="p-2 bg-white/90 rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-lg"
-                          >
-                            <ImageIcon className="w-4 h-4 text-gray-700" />
-                          </a>
-                        </div>
-                      </div>
-                      <div className="flex justify-end relative">
-                        <button 
-                          onClick={() => setOpenMenuIndex(openMenuIndex === idx ? null : idx)}
-                          className="p-1.5 hover:bg-gray-100 rounded-full text-gray-500 transition-colors"
-                        >
-                          <MoreHorizontal className="w-5 h-5" />
+                  <AnimatePresence>
+                    {openMenuIndex === currentImageIndex && (
+                      <motion.div
+                        initial={{ opacity: 0, scale: 0.9, y: 5 }}
+                        animate={{ opacity: 1, scale: 1, y: 0 }}
+                        exit={{ opacity: 0, scale: 0.9, y: 5 }}
+                        className="absolute top-full right-0 mt-2 bg-white rounded-xl shadow-xl border border-gray-100 p-1.5 z-50 min-w-[180px]"
+                      >
+                        <button onClick={() => { startAnalysis(showImagesFor[currentImageIndex]); setOpenMenuIndex(null); }} className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-gray-50 rounded-lg text-sm font-medium text-gray-700 transition-colors">
+                          <Brain className="w-4 h-4 text-blue-500" /> Analisis Gambar
                         </button>
-                        <AnimatePresence>
-                          {openMenuIndex === idx && (
-                            <motion.div
-                              initial={{ opacity: 0, scale: 0.9, y: 5 }}
-                              animate={{ opacity: 1, scale: 1, y: 0 }}
-                              exit={{ opacity: 0, scale: 0.9, y: 5 }}
-                              className="absolute bottom-full right-0 mb-1 bg-white rounded-xl shadow-lg border border-gray-100 p-1.5 z-50 min-w-[160px]"
-                            >
-                              <button onClick={() => handleDownload(img)} className="w-full flex items-center gap-3 px-3 py-2 hover:bg-gray-50 rounded-lg text-sm font-medium text-gray-700 transition-colors">
-                                <Download className="w-4 h-4 text-gray-500" /> Unduh
-                              </button>
-                              <button onClick={() => handleShareImage(img)} className="w-full flex items-center gap-3 px-3 py-2 hover:bg-gray-50 rounded-lg text-sm font-medium text-gray-700 transition-colors">
-                                <Share2 className="w-4 h-4 text-gray-500" /> Share
-                              </button>
-                              <button onClick={() => handleSaveToCloud(img)} className="w-full flex items-center gap-3 px-3 py-2 hover:bg-gray-50 rounded-lg text-sm font-medium text-gray-700 transition-colors">
-                                <Cloud className="w-4 h-4 text-gray-500" /> Simpan ke Cloud
-                              </button>
-                            </motion.div>
-                          )}
-                        </AnimatePresence>
-                      </div>
-                    </motion.div>
-                  ))}
+                        <button onClick={() => { handleDownload(showImagesFor[currentImageIndex]); setOpenMenuIndex(null); }} className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-gray-50 rounded-lg text-sm font-medium text-gray-700 transition-colors">
+                          <Download className="w-4 h-4 text-gray-500" /> Unduh
+                        </button>
+                        <button onClick={() => { handleShareImage(showImagesFor[currentImageIndex]); setOpenMenuIndex(null); }} className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-gray-50 rounded-lg text-sm font-medium text-gray-700 transition-colors">
+                          <Share2 className="w-4 h-4 text-gray-500" /> Bagikan
+                        </button>
+                        <button onClick={() => { handleSaveToCloud(showImagesFor[currentImageIndex]); setOpenMenuIndex(null); }} className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-gray-50 rounded-lg text-sm font-medium text-gray-700 transition-colors">
+                          <Cloud className="w-4 h-4 text-gray-500" /> Simpan ke Cloud
+                        </button>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
                 </div>
+
+                {showImagesFor.length > 1 && (
+                  <div className="absolute bottom-[-40px] flex gap-2">
+                    {showImagesFor.map((_, idx) => (
+                      <button 
+                        key={idx}
+                        onClick={() => setCurrentImageIndex(idx)}
+                        className={`w-2.5 h-2.5 rounded-full transition-all ${idx === currentImageIndex ? 'bg-white scale-125' : 'bg-white/40 hover:bg-white/60'}`}
+                      />
+                    ))}
+                  </div>
+                )}
               </div>
-            </motion.div>
-          </>
+
+              {showImagesFor.length > 1 && (
+                <button 
+                  onClick={() => setCurrentImageIndex((prev) => (prev < showImagesFor.length - 1 ? prev + 1 : 0))}
+                  className="absolute right-4 md:right-8 p-3 bg-white/10 hover:bg-white/20 rounded-full transition-colors z-50"
+                >
+                  <ChevronDown className="w-6 h-6 text-white -rotate-90" />
+                </button>
+              )}
+            </div>
+          </div>
         )}
       </AnimatePresence>
       {/* Model Selection Bottom Sheet */}
       <AnimatePresence>
         {isModelMenuOpen && (
-          <>
-            <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setIsModelMenuOpen(false)}
-              className="fixed inset-0 bg-black/40 backdrop-blur-md z-[100]"
-            />
+          <div className="fixed inset-0 z-[100] flex items-end md:items-center justify-center bg-black/40 backdrop-blur-md" onClick={() => setIsModelMenuOpen(false)}>
             <motion.div
+              onClick={(e) => e.stopPropagation()}
               initial={{ y: '100%' }}
               animate={{ y: 0 }}
               exit={{ y: '100%' }}
               transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-              className="fixed bottom-0 left-0 right-0 bg-white rounded-t-3xl shadow-2xl z-[101] p-6 max-h-[85vh] overflow-y-auto"
+              className="w-full md:max-w-md bg-white rounded-t-3xl md:rounded-3xl shadow-2xl p-6 max-h-[85vh] overflow-y-auto"
             >
-              <div className="w-12 h-1.5 bg-gray-200 rounded-full mx-auto mb-6" />
-              <h2 className="text-xl font-bold text-gray-900 mb-4">Pilih Model</h2>
+              <div className="w-12 h-1.5 bg-gray-200 rounded-full mx-auto mb-6 md:hidden" />
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-xl font-bold text-gray-900">Pilih Model</h2>
+                <button onClick={() => setIsModelMenuOpen(false)} className="hidden md:block p-2 hover:bg-gray-100 rounded-full transition-colors">
+                  <X className="w-5 h-5 text-gray-500" />
+                </button>
+              </div>
               
               <div className="space-y-3">
                 <button 
@@ -2162,12 +1915,11 @@ export default function ZhiyouApp() {
                   <div className="flex items-center gap-4">
                     <div className="w-10 h-10 rounded-full bg-purple-100 flex items-center justify-center text-purple-600 relative">
                       <Search className="w-5 h-5" />
-                      <Crown className="w-3 h-3 absolute -top-1 -right-1 text-purple-500" />
                     </div>
                     <div className="text-left">
                       <div className="flex items-center gap-2">
                         <h3 className="font-semibold text-gray-900">Zhiyou Art</h3>
-                        <span className="px-2 py-0.5 bg-purple-100 text-purple-700 text-[10px] font-bold rounded-full uppercase tracking-wider">VIP</span>
+                        <span className="px-2 py-0.5 bg-green-100 text-green-700 text-[10px] font-bold rounded-full uppercase tracking-wider">FREE</span>
                       </div>
                       <p className="text-sm text-gray-500">Pencarian gambar cerdas</p>
                     </div>
@@ -2182,13 +1934,11 @@ export default function ZhiyouApp() {
                   <div className="flex items-center gap-4">
                     <div className="w-10 h-10 rounded-full bg-pink-100 flex items-center justify-center text-pink-600 relative">
                       <ImageIcon className="w-5 h-5" />
-                      <Crown className="w-3 h-3 absolute -top-1 -right-1 text-pink-500" />
                     </div>
                     <div className="text-left">
                       <div className="flex items-center gap-2">
                         <h3 className="font-semibold text-gray-900">Zhiyou Art 2.0</h3>
-                        <span className="px-2 py-0.5 bg-pink-100 text-pink-700 text-[10px] font-bold rounded-full uppercase tracking-wider">Baru</span>
-                        <span className="px-2 py-0.5 bg-amber-100 text-amber-700 text-[10px] font-bold rounded-full uppercase tracking-wider">VIP</span>
+                        <span className="px-2 py-0.5 bg-green-100 text-green-700 text-[10px] font-bold rounded-full uppercase tracking-wider">FREE</span>
                       </div>
                       <p className="text-sm text-gray-500">Pembuatan gambar AI berkualitas tinggi</p>
                     </div>
@@ -2197,13 +1947,30 @@ export default function ZhiyouApp() {
                 </button>
               </div>
             </motion.div>
-          </>
+          </div>
         )}
       </AnimatePresence>
 
       {/* Toast Notification */}
       <AnimatePresence>
-        {isSavingToCloud && (
+        {toastMessage && (
+          <motion.div
+            initial={{ opacity: 0, y: 50 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 50 }}
+            className={`fixed bottom-24 left-1/2 -translate-x-1/2 px-4 py-2 rounded-full shadow-lg flex items-center gap-3 z-[200] ${
+              toastMessage.type === 'success' ? 'bg-emerald-600 text-white' :
+              toastMessage.type === 'error' ? 'bg-red-600 text-white' :
+              'bg-gray-900 text-white'
+            }`}
+          >
+            {toastMessage.type === 'success' && <Check className="w-4 h-4" />}
+            {toastMessage.type === 'error' && <X className="w-4 h-4" />}
+            {toastMessage.type === 'info' && <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
+            <span className="text-sm font-medium">{toastMessage.text}</span>
+          </motion.div>
+        )}
+        {isSavingToCloud && !toastMessage && (
           <motion.div
             initial={{ opacity: 0, y: 50 }}
             animate={{ opacity: 1, y: 0 }}
