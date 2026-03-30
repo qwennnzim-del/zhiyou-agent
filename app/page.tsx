@@ -962,7 +962,7 @@ export default function ZhiyouApp() {
       } else {
         if (selectedModel === 'zhiyou-3') {
           const responseStream = await ai.models.generateContentStream({
-            model: 'gemini-3.1-pro-preview',
+            model: 'gemini-2.5-flash',
             contents: contents,
             config: config
           });
