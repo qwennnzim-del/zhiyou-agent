@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Menu, Plus, PlusCircle, Wand2, ArrowUp, ChevronDown, X, Settings, HelpCircle, LogIn, Image as ImageIcon, Video, FileText, Paperclip, ArrowLeft, BookOpen, Search, Trash2, Globe, ThumbsUp, Copy, Check, Share2, MoreHorizontal, Download, Cloud, Brain, Zap, Crown, Maximize2 } from 'lucide-react';
+import { Menu, Plus, PlusCircle, Wand2, ArrowUp, ChevronDown, X, Settings, HelpCircle, LogIn, Image as ImageIcon, Video, FileText, Paperclip, ArrowLeft, BookOpen, Search, Trash2, Globe, ThumbsUp, Copy, Check, Share2, MoreHorizontal, Download, Cloud, Brain, Zap, Crown, Maximize2, MoreVertical } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -33,6 +33,7 @@ type Source = {
 type Message = {
   role: 'user' | 'model';
   text: string;
+  reasoning?: string;
   attachments?: Attachment[];
   sources?: Source[];
   imageResults?: string[];
@@ -67,7 +68,7 @@ const ZhiyouLogo = ({ className = "w-5 h-5" }: { className?: string }) => (
 export default function ZhiyouApp() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [user, setUser] = useState<User | null>(null);
-  const [credits, setCredits] = useState<number | null>(null);
+  const [proUses, setProUses] = useState<number | null>(null);
   const [chatId, setChatId] = useState<string | null>(null);
   const [chatHistory, setChatHistory] = useState<Chat[]>([]);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
@@ -93,6 +94,7 @@ export default function ZhiyouApp() {
   const [copiedMessageIndex, setCopiedMessageIndex] = useState<number | null>(null);
   const [likedMessageIndex, setLikedMessageIndex] = useState<number | null>(null);
   const [sharedMessageIndex, setSharedMessageIndex] = useState<number | null>(null);
+  const [showReasoningFor, setShowReasoningFor] = useState<number | null>(null);
   const [loadingTextIndex, setLoadingTextIndex] = useState(0);
   const [currentPrompt, setCurrentPrompt] = useState('');
   const [isImageAnalysisMode, setIsImageAnalysisMode] = useState(false);
@@ -477,17 +479,17 @@ export default function ZhiyouApp() {
     const unsubscribe = onSnapshot(userRef, async (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
-        if (data.credits !== undefined) {
-          setCredits(data.credits);
+        if (data.proUses !== undefined) {
+          setProUses(data.proUses);
         } else {
-          // Initialize credits if not present
-          await setDoc(userRef, { credits: 60 }, { merge: true });
-          setCredits(60);
+          // Initialize pro uses if not present
+          await setDoc(userRef, { proUses: 5 }, { merge: true });
+          setProUses(5);
         }
       } else {
-        // Create user document with initial credits
-        await setDoc(userRef, { credits: 60, createdAt: serverTimestamp() });
-        setCredits(60);
+        // Create user document with initial pro uses
+        await setDoc(userRef, { proUses: 5, createdAt: serverTimestamp() });
+        setProUses(5);
       }
     });
 
@@ -827,28 +829,49 @@ export default function ZhiyouApp() {
       let fullText = '';
       let sources: Source[] = [];
 
-      const isImageFeature = isImageFeatureMode && !isQuestion && !isImageAnalysisMode;
       const isDeveloper = user?.email === 'cipaonly08@gmail.com';
+      const isProFeature = selectedModel === 'zhiyou-3' || featureMode === 'image' || featureMode === 'imageSearch' || selectedModel === 'zhiyou-art' || selectedModel === 'zhiyou-art-2.0';
       
-      if (isImageFeature) {
+      if (isProFeature) {
         if (!user) {
           setIsThinking(false);
           setMessages(prev => {
             const newMessages = [...prev];
-            newMessages[newMessages.length - 1].text = "Silakan login untuk menggunakan fitur ini.";
+            newMessages[newMessages.length - 1].text = "Silakan login untuk menggunakan fitur pro ini.";
             return newMessages;
           });
           setIsLoading(false);
           return;
         }
-        // Image generation is now free, no credit deduction
+
+        if (!isDeveloper && proUses !== null && proUses <= 0) {
+          setIsThinking(false);
+          setMessages(prev => {
+            const newMessages = [...prev];
+            newMessages[newMessages.length - 1].text = "Maaf, batas pemakaian fitur Pro Anda (5 kali) telah habis. Fitur ini mencakup model Zhiyou 3, pembuatan gambar, dan pencarian gambar.";
+            return newMessages;
+          });
+          setIsLoading(false);
+          return;
+        }
+
+        // Deduct pro use if not developer
+        if (!isDeveloper && proUses !== null && proUses > 0) {
+          const userRef = doc(db, 'users', user.uid);
+          await setDoc(userRef, { proUses: proUses - 1 }, { merge: true });
+        }
       }
 
       if (featureMode === 'image' || selectedModel === 'zhiyou-art-2.0') {
         if (!user) return;
         
         try {
-          const response = await ai.models.generateContent({
+          // Add a timeout promise to prevent hanging indefinitely
+          const timeoutPromise = new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Waktu pembuatan gambar habis (timeout). Silakan coba lagi dengan prompt yang lebih sederhana.')), 45000)
+          );
+
+          const generatePromise = ai.models.generateContent({
             model: 'gemini-2.5-flash-image',
             contents: {
               parts: [
@@ -864,6 +887,8 @@ export default function ZhiyouApp() {
             },
           });
 
+          const response = await Promise.race([generatePromise, timeoutPromise]) as any;
+
           const imageResults: string[] = [];
           for (const part of response.candidates?.[0]?.content?.parts || []) {
             if (part.inlineData) {
@@ -873,7 +898,9 @@ export default function ZhiyouApp() {
             }
           }
 
-          if (imageResults.length === 0) throw new Error('Gagal membuat gambar');
+          if (imageResults.length === 0) {
+            throw new Error('Gagal membuat gambar. Prompt mungkin melanggar kebijakan keamanan atau model sedang sibuk.');
+          }
           
           setIsThinking(false);
           setMessages(prev => {
@@ -884,25 +911,29 @@ export default function ZhiyouApp() {
             return newMessages;
           });
         } catch (error: any) {
+          console.error("Image generation error:", error);
           setIsThinking(false);
           setMessages(prev => {
             const newMessages = [...prev];
-            newMessages[newMessages.length - 1].text = "Maaf, terjadi kesalahan saat membuat gambar: " + error.message;
+            newMessages[newMessages.length - 1].text = `Maaf, terjadi kesalahan saat membuat gambar: ${error.message || 'Kesalahan tidak diketahui'}. Silakan coba lagi.`;
             return newMessages;
           });
         }
       } else if (featureMode === 'imageSearch' || selectedModel === 'zhiyou-art') {
         try {
-          const response = await fetch('/api/search-image', {
+          const timeoutPromise = new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Waktu pencarian gambar habis (timeout). Silakan coba lagi.')), 30000)
+          );
+
+          const fetchPromise = fetch('/api/search-image', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ prompt: finalPrompt })
           });
+
+          const response = await Promise.race([fetchPromise, timeoutPromise]) as Response;
           
           const data = await response.json();
-          
-          // Add 5 second delay for loading effect as requested
-          await new Promise(resolve => setTimeout(resolve, 5000));
           
           setIsThinking(false);
 
@@ -920,56 +951,110 @@ export default function ZhiyouApp() {
             return newMessages;
           });
         } catch (error: any) {
+          console.error("Image search error:", error);
           setIsThinking(false);
           setMessages(prev => {
             const newMessages = [...prev];
-            newMessages[newMessages.length - 1].text = "Maaf, terjadi kesalahan saat mencari gambar: " + error.message;
+            newMessages[newMessages.length - 1].text = `Maaf, terjadi kesalahan saat mencari gambar: ${error.message || 'Kesalahan tidak diketahui'}. Silakan coba lagi.`;
             return newMessages;
           });
         }
       } else {
         if (selectedModel === 'zhiyou-3') {
-          // Artificial delay for "reasoning" effect as requested by user
-          await new Promise(resolve => setTimeout(resolve, 2000));
-        }
-
-        const responseStream = await ai.models.generateContentStream({
-          model: 'gemini-2.5-flash', // Use gemini-2.5-flash for both to avoid quota limits
-          contents: contents,
-          config: config
-        });
-        
-        let firstChunk = true;
-        
-        for await (const chunk of responseStream) {
-          if (firstChunk) {
-            setIsThinking(false);
-            firstChunk = false;
-          }
+          const responseStream = await ai.models.generateContentStream({
+            model: 'gemini-3.1-pro-preview',
+            contents: contents,
+            config: config
+          });
           
-          const c = chunk as any;
-          if (c.text) {
-            fullText += c.text;
-          }
+          let firstChunk = true;
           
-          const chunks = c.candidates?.[0]?.groundingMetadata?.groundingChunks;
-          if (chunks) {
-            chunks.forEach((gc: any) => {
-              if (gc.web?.uri && gc.web?.title) {
-                // Avoid duplicates
-                if (!sources.find(s => s.uri === gc.web.uri)) {
-                  sources.push({ uri: gc.web.uri, title: gc.web.title });
-                }
+          for await (const chunk of responseStream) {
+            if (firstChunk) {
+              setIsThinking(false);
+              firstChunk = false;
+            }
+            
+            const c = chunk as any;
+            if (c.text) {
+              fullText += c.text;
+            }
+            
+            let displayText = fullText;
+            let reasoningText = '';
+            
+            if (fullText.includes('<think>') && fullText.includes('</think>')) {
+              const parts = fullText.split('</think>');
+              if (parts.length > 1) {
+                reasoningText = parts[0].replace('<think>', '').trim();
+                displayText = parts[1].trim();
               }
+            } else if (fullText.includes('<think>')) {
+               reasoningText = fullText.replace('<think>', '').trim();
+               displayText = '';
+            }
+            
+            const chunks = c.candidates?.[0]?.groundingMetadata?.groundingChunks;
+            if (chunks) {
+              chunks.forEach((gc: any) => {
+                if (gc.web?.uri && gc.web?.title) {
+                  // Avoid duplicates
+                  if (!sources.find(s => s.uri === gc.web.uri)) {
+                    sources.push({ uri: gc.web.uri, title: gc.web.title });
+                  }
+                }
+              });
+            }
+
+            setMessages(prev => {
+              const newMessages = [...prev];
+              newMessages[newMessages.length - 1].text = displayText;
+              if (reasoningText) {
+                newMessages[newMessages.length - 1].reasoning = reasoningText;
+              }
+              newMessages[newMessages.length - 1].sources = sources;
+              return newMessages;
             });
           }
-
-          setMessages(prev => {
-            const newMessages = [...prev];
-            newMessages[newMessages.length - 1].text = fullText;
-            newMessages[newMessages.length - 1].sources = sources;
-            return newMessages;
+        } else {
+          const responseStream = await ai.models.generateContentStream({
+            model: 'gemini-2.5-flash', // Use gemini-2.5-flash for both to avoid quota limits
+            contents: contents,
+            config: config
           });
+          
+          let firstChunk = true;
+          
+          for await (const chunk of responseStream) {
+            if (firstChunk) {
+              setIsThinking(false);
+              firstChunk = false;
+            }
+            
+            const c = chunk as any;
+            if (c.text) {
+              fullText += c.text;
+            }
+            
+            const chunks = c.candidates?.[0]?.groundingMetadata?.groundingChunks;
+            if (chunks) {
+              chunks.forEach((gc: any) => {
+                if (gc.web?.uri && gc.web?.title) {
+                  // Avoid duplicates
+                  if (!sources.find(s => s.uri === gc.web.uri)) {
+                    sources.push({ uri: gc.web.uri, title: gc.web.title });
+                  }
+                }
+              });
+            }
+
+            setMessages(prev => {
+              const newMessages = [...prev];
+              newMessages[newMessages.length - 1].text = fullText;
+              newMessages[newMessages.length - 1].sources = sources;
+              return newMessages;
+            });
+          }
         }
       }
 
@@ -985,6 +1070,7 @@ export default function ZhiyouApp() {
             const msgsToSave = prev.map(m => ({
               role: m.role,
               text: m.text,
+              reasoning: m.reasoning || null,
               attachments: m.attachments?.map(a => ({
                 base64: a.base64,
                 mimeType: a.mimeType,
@@ -1160,14 +1246,23 @@ export default function ZhiyouApp() {
           
           {user ? (
             <div className="flex items-center gap-3">
-              <Link href="/settings" className="flex items-center gap-2 bg-gradient-to-r from-amber-100 to-orange-100 px-3 py-1.5 rounded-full border border-amber-200/50 shadow-sm cursor-pointer hover:scale-105 transition-transform" title="Your Credits">
-                <span className="text-amber-600 font-bold text-sm">✨ {credits !== null ? credits : '...'}</span>
-              </Link>
               <div className="hidden sm:flex flex-col items-end">
-                <span className="text-sm font-medium text-gray-900">{user.displayName || 'User'}</span>
+                {user.email === 'cipaonly08@gmail.com' ? (
+                  <div className="relative p-[2px] rounded-full overflow-hidden">
+                    <div className="absolute inset-0 bg-gradient-to-r from-purple-500 via-pink-500 to-blue-500 animate-[spin_3s_linear_infinite]" />
+                    <div className="bg-white rounded-full px-3 py-1 relative z-10 flex items-center gap-1.5">
+                      <span className="text-sm font-bold bg-gradient-to-r from-purple-600 to-blue-600 bg-clip-text text-transparent">
+                        {user.displayName || 'Pro User'}
+                      </span>
+                      <Crown className="w-3.5 h-3.5 text-purple-500" />
+                    </div>
+                  </div>
+                ) : (
+                  <span className="text-sm font-medium text-gray-900">{user.displayName || 'User'}</span>
+                )}
               </div>
               <Link href="/settings">
-                <img src={user.photoURL || `https://ui-avatars.com/api/?name=${user.displayName || 'User'}&background=random`} alt="Profile" className="w-8 h-8 rounded-full border border-gray-200 hover:scale-105 transition-transform cursor-pointer" />
+                <img src={user.photoURL || `https://ui-avatars.com/api/?name=${user.displayName || 'User'}&background=random`} alt="Profile" className={`w-8 h-8 rounded-full border-2 transition-transform cursor-pointer hover:scale-105 ${user.email === 'cipaonly08@gmail.com' ? 'border-purple-500' : 'border-gray-200'}`} />
               </Link>
             </div>
           ) : (
@@ -1295,22 +1390,20 @@ export default function ZhiyouApp() {
                               )}
                             </div>
                             <div className={`grid ${msg.imageResults.length === 1 ? 'grid-cols-1' : 'grid-cols-2'} gap-2`}>
-                              {msg.imageResults.map((url, i) => (
-                                <div 
-                                  key={i} 
-                                  className="relative group rounded-2xl overflow-hidden border border-gray-100 shadow-sm bg-gray-50"
-                                >
+                              {msg.imageResults.slice(0, 4).map((url, i) => {
+                                const isLastAndMore = i === 3 && msg.imageResults!.length > 4;
+                                return (
                                   <div 
+                                    key={i} 
+                                    className="relative group rounded-2xl overflow-hidden border border-gray-100 shadow-sm bg-gray-50 aspect-square cursor-pointer"
                                     onClick={() => {
                                       setShowImagesFor(msg.imageResults!);
-                                      setCurrentImageIndex(i);
                                     }}
-                                    className="aspect-square cursor-pointer overflow-hidden"
                                   >
                                     <img 
                                       src={url || 'https://picsum.photos/seed/error/400/400'} 
                                       alt={`Result ${i+1}`} 
-                                      className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700" 
+                                      className={`w-full h-full object-cover transition-transform duration-700 ${isLastAndMore ? 'blur-sm brightness-75' : 'group-hover:scale-110'}`} 
                                       onError={(e) => {
                                         const target = e.target as HTMLImageElement;
                                         if (url && !target.src.includes('/api/proxy-image')) {
@@ -1320,16 +1413,24 @@ export default function ZhiyouApp() {
                                         }
                                       }}
                                     />
-                                    <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors" />
+                                    {isLastAndMore && (
+                                      <div className="absolute inset-0 flex items-center justify-center bg-black/40">
+                                        <span className="text-white font-bold text-xl">+{msg.imageResults!.length - 4} contoh</span>
+                                      </div>
+                                    )}
+                                    {!isLastAndMore && (
+                                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors" />
+                                    )}
+                                    {!isLastAndMore && (
+                                      <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+                                        <div className="p-3 bg-black/50 backdrop-blur-sm rounded-full text-white shadow-lg">
+                                          <Maximize2 className="w-6 h-6" />
+                                        </div>
+                                      </div>
+                                    )}
                                   </div>
-                                  
-                                  <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
-                                    <div className="p-3 bg-black/50 backdrop-blur-sm rounded-full text-white shadow-lg">
-                                      <Maximize2 className="w-6 h-6" />
-                                    </div>
-                                  </div>
-                                </div>
-                              ))}
+                                );
+                              })}
                             </div>
                           </motion.div>
                         )}
@@ -1357,8 +1458,8 @@ export default function ZhiyouApp() {
                                 </div>
                               )}
 
-                              <div className="grid grid-cols-2 gap-2 rounded-2xl overflow-hidden border border-gray-100 shadow-sm">
-                                {[1, 2, 3, 4].slice(0, msg.model === 'zhiyou-art-2.0' ? 2 : 4).map((i) => (
+                              <div className={`grid ${msg.model === 'zhiyou-art-2.0' ? 'grid-cols-1' : 'grid-cols-2'} gap-2 rounded-2xl overflow-hidden border border-gray-100 shadow-sm`}>
+                                {[1, 2, 3, 4].slice(0, msg.model === 'zhiyou-art-2.0' ? 1 : 4).map((i) => (
                                   <div key={i} className="relative bg-gray-100 aspect-square overflow-hidden">
                                     <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/60 to-transparent animate-shimmer-rtl"></div>
                                     <div className="absolute inset-0 flex items-center justify-center">
@@ -1390,6 +1491,34 @@ export default function ZhiyouApp() {
                           )
                         ) : (
                           <>
+                            {/* Reasoning Text */}
+                            {msg.reasoning && (
+                              <div className="mb-4">
+                                <button 
+                                  onClick={() => setShowReasoningFor(showReasoningFor === idx ? null : idx)}
+                                  className="flex items-center gap-2 text-xs font-medium text-gray-500 hover:text-gray-700 transition-colors bg-gray-50 hover:bg-gray-100 px-3 py-1.5 rounded-full border border-gray-200"
+                                >
+                                  <Brain className="w-3.5 h-3.5" />
+                                  Proses Penalaran
+                                  <ChevronDown className={`w-3 h-3 transition-transform ${showReasoningFor === idx ? 'rotate-180' : ''}`} />
+                                </button>
+                                
+                                <AnimatePresence>
+                                  {showReasoningFor === idx && (
+                                    <motion.div
+                                      initial={{ height: 0, opacity: 0 }}
+                                      animate={{ height: 'auto', opacity: 1 }}
+                                      exit={{ height: 0, opacity: 0 }}
+                                      className="overflow-hidden mt-2"
+                                    >
+                                      <div className="p-4 bg-gray-50/80 rounded-xl border border-gray-100 text-sm text-gray-500 italic leading-relaxed whitespace-pre-wrap">
+                                        {msg.reasoning}
+                                      </div>
+                                    </motion.div>
+                                  )}
+                                </AnimatePresence>
+                              </div>
+                            )}
                             <ReactMarkdown remarkPlugins={[remarkGfm]}>
                               {msg.text || '...'}
                             </ReactMarkdown>
@@ -1553,6 +1682,22 @@ export default function ZhiyouApp() {
                   className={`w-full bg-transparent resize-none outline-none max-h-48 min-h-[40px] text-gray-800 placeholder:text-gray-500 text-base transition-opacity duration-300 ${input.length > 0 ? 'opacity-100' : 'opacity-70'}`}
                   rows={1}
                 />
+                
+                {/* Pro Uses Indicator */}
+                {user && user.email !== 'cipaonly08@gmail.com' && proUses !== null && (selectedModel === 'zhiyou-3' || featureMode === 'image' || featureMode === 'imageSearch' || selectedModel === 'zhiyou-art' || selectedModel === 'zhiyou-art-2.0') && (
+                  <div className="absolute top-2 right-2 flex items-center justify-center bg-gradient-to-r from-purple-100 to-blue-100 border border-purple-200 rounded-full px-2 py-1 shadow-sm" title="Pro Uses Remaining">
+                    <Zap className="w-3.5 h-3.5 text-purple-600 mr-1" />
+                    <span className="text-xs font-bold text-purple-700">{proUses}</span>
+                  </div>
+                )}
+                
+                {/* Pro Uses Indicator */}
+                {user && user.email !== 'cipaonly08@gmail.com' && proUses !== null && (selectedModel === 'zhiyou-3' || featureMode === 'image' || featureMode === 'imageSearch' || selectedModel === 'zhiyou-art' || selectedModel === 'zhiyou-art-2.0') && (
+                  <div className="absolute top-2 right-2 flex items-center justify-center bg-gradient-to-r from-purple-100 to-blue-100 border border-purple-200 rounded-full px-2 py-1 shadow-sm" title="Pro Uses Remaining">
+                    <Zap className="w-3.5 h-3.5 text-purple-600 mr-1" />
+                    <span className="text-xs font-bold text-purple-700">{proUses}</span>
+                  </div>
+                )}
                 
                 <div className="flex items-center justify-between mt-2">
                   <div className="flex items-center gap-1 relative" ref={attachmentMenuRef}>
@@ -1763,91 +1908,88 @@ export default function ZhiyouApp() {
         )}
       </AnimatePresence>
 
-      {/* Image Gallery Slidebar */}
+      {/* Image Gallery Bottom Sheet */}
       <AnimatePresence>
         {showImagesFor && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 backdrop-blur-md" onClick={() => setShowImagesFor(null)}>
-            <button onClick={() => setShowImagesFor(null)} className="absolute top-4 right-4 p-2 bg-white/10 hover:bg-white/20 rounded-full transition-colors z-50">
-              <X className="w-6 h-6 text-white" />
-            </button>
-            
-            <div className="relative w-full h-full flex items-center justify-center p-4 md:p-12" onClick={(e) => e.stopPropagation()}>
-              {showImagesFor.length > 1 && (
-                <button 
-                  onClick={() => setCurrentImageIndex((prev) => (prev > 0 ? prev - 1 : showImagesFor.length - 1))}
-                  className="absolute left-4 md:left-8 p-3 bg-white/10 hover:bg-white/20 rounded-full transition-colors z-50"
-                >
-                  <ChevronDown className="w-6 h-6 text-white rotate-90" />
-                </button>
-              )}
-
-              <div className="relative max-w-4xl max-h-full flex flex-col items-center justify-center">
-                <img 
-                  src={showImagesFor[currentImageIndex] || 'https://picsum.photos/seed/error/800/800'} 
-                  alt={`Result ${currentImageIndex + 1}`} 
-                  className="max-w-full max-h-[80vh] object-contain rounded-lg shadow-2xl"
-                  onError={(e) => {
-                    const target = e.target as HTMLImageElement;
-                    if (showImagesFor[currentImageIndex] && !target.src.includes('/api/proxy-image')) {
-                      target.src = `/api/proxy-image?url=${encodeURIComponent(showImagesFor[currentImageIndex])}`;
-                    }
-                  }}
-                />
-                
-                <div className="absolute top-4 right-4">
-                  <button 
-                    onClick={() => setOpenMenuIndex(openMenuIndex === currentImageIndex ? null : currentImageIndex)}
-                    className="p-2 bg-black/50 hover:bg-black/70 rounded-full text-white transition-colors backdrop-blur-sm"
-                  >
-                    <MoreHorizontal className="w-5 h-5" />
-                  </button>
-                  <AnimatePresence>
-                    {openMenuIndex === currentImageIndex && (
-                      <motion.div
-                        initial={{ opacity: 0, scale: 0.9, y: 5 }}
-                        animate={{ opacity: 1, scale: 1, y: 0 }}
-                        exit={{ opacity: 0, scale: 0.9, y: 5 }}
-                        className="absolute top-full right-0 mt-2 bg-white rounded-xl shadow-xl border border-gray-100 p-1.5 z-50 min-w-[180px]"
-                      >
-                        <button onClick={() => { startAnalysis(showImagesFor[currentImageIndex]); setOpenMenuIndex(null); }} className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-gray-50 rounded-lg text-sm font-medium text-gray-700 transition-colors">
-                          <Brain className="w-4 h-4 text-blue-500" /> Analisis Gambar
-                        </button>
-                        <button onClick={() => { handleDownload(showImagesFor[currentImageIndex]); setOpenMenuIndex(null); }} className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-gray-50 rounded-lg text-sm font-medium text-gray-700 transition-colors">
-                          <Download className="w-4 h-4 text-gray-500" /> Unduh
-                        </button>
-                        <button onClick={() => { handleShareImage(showImagesFor[currentImageIndex]); setOpenMenuIndex(null); }} className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-gray-50 rounded-lg text-sm font-medium text-gray-700 transition-colors">
-                          <Share2 className="w-4 h-4 text-gray-500" /> Bagikan
-                        </button>
-                        <button onClick={() => { handleSaveToCloud(showImagesFor[currentImageIndex]); setOpenMenuIndex(null); }} className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-gray-50 rounded-lg text-sm font-medium text-gray-700 transition-colors">
-                          <Cloud className="w-4 h-4 text-gray-500" /> Simpan ke Cloud
-                        </button>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </div>
-
-                {showImagesFor.length > 1 && (
-                  <div className="absolute bottom-[-40px] flex gap-2">
-                    {showImagesFor.map((_, idx) => (
-                      <button 
-                        key={idx}
-                        onClick={() => setCurrentImageIndex(idx)}
-                        className={`w-2.5 h-2.5 rounded-full transition-all ${idx === currentImageIndex ? 'bg-white scale-125' : 'bg-white/40 hover:bg-white/60'}`}
-                      />
-                    ))}
+          <div className="fixed inset-0 z-[100] flex items-end justify-center bg-black/40 backdrop-blur-sm" onClick={() => setShowImagesFor(null)}>
+            <motion.div
+              onClick={(e) => e.stopPropagation()}
+              initial={{ y: '100%' }}
+              animate={{ y: 0 }}
+              exit={{ y: '100%' }}
+              transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+              className="bg-white w-full max-w-2xl rounded-t-[32px] md:rounded-[32px] p-6 shadow-2xl flex flex-col gap-6 max-h-[85vh]"
+            >
+              <div className="flex items-center justify-between shrink-0">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center">
+                    <ImageIcon className="w-5 h-5 text-blue-500" />
                   </div>
-                )}
+                  <div>
+                    <h3 className="text-lg font-bold text-gray-900">Semua Gambar</h3>
+                    <p className="text-xs text-gray-500">{showImagesFor.length} hasil ditemukan</p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => setShowImagesFor(null)}
+                  className="p-2 hover:bg-gray-100 rounded-full transition-colors"
+                >
+                  <X className="w-6 h-6 text-gray-400" />
+                </button>
               </div>
 
-              {showImagesFor.length > 1 && (
-                <button 
-                  onClick={() => setCurrentImageIndex((prev) => (prev < showImagesFor.length - 1 ? prev + 1 : 0))}
-                  className="absolute right-4 md:right-8 p-3 bg-white/10 hover:bg-white/20 rounded-full transition-colors z-50"
-                >
-                  <ChevronDown className="w-6 h-6 text-white -rotate-90" />
-                </button>
-              )}
-            </div>
+              <div className="overflow-y-auto flex-1 pr-2 -mr-2 space-y-6">
+                {showImagesFor.map((url, idx) => (
+                  <div key={idx} className="flex flex-col gap-3">
+                    <div className="w-full rounded-2xl overflow-hidden border border-gray-100 shadow-sm bg-gray-50">
+                      <img 
+                        src={url} 
+                        alt={`Result ${idx + 1}`} 
+                        className="w-full h-auto object-contain max-h-[60vh]"
+                        onError={(e) => {
+                          const target = e.target as HTMLImageElement;
+                          if (url && !target.src.includes('/api/proxy-image')) {
+                            target.src = `/api/proxy-image?url=${encodeURIComponent(url)}`;
+                          }
+                        }}
+                      />
+                    </div>
+                    <div className="flex justify-end relative">
+                      <button 
+                        onClick={() => setOpenMenuIndex(openMenuIndex === idx ? null : idx)}
+                        className="p-2 hover:bg-gray-100 rounded-full transition-colors"
+                      >
+                        <MoreVertical className="w-5 h-5 text-gray-600" />
+                      </button>
+                      
+                      <AnimatePresence>
+                        {openMenuIndex === idx && (
+                          <motion.div
+                            initial={{ opacity: 0, scale: 0.9, y: 5 }}
+                            animate={{ opacity: 1, scale: 1, y: 0 }}
+                            exit={{ opacity: 0, scale: 0.9, y: 5 }}
+                            className="absolute bottom-full right-0 mb-2 bg-white rounded-xl shadow-xl border border-gray-100 p-1.5 z-50 min-w-[180px]"
+                          >
+                            <button onClick={() => { startAnalysis(url); setOpenMenuIndex(null); setShowImagesFor(null); }} className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-gray-50 rounded-lg text-sm font-medium text-gray-700 transition-colors">
+                              <Brain className="w-4 h-4 text-blue-500" /> Analisis Gambar
+                            </button>
+                            <button onClick={() => { handleDownload(url); setOpenMenuIndex(null); }} className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-gray-50 rounded-lg text-sm font-medium text-gray-700 transition-colors">
+                              <Download className="w-4 h-4 text-gray-500" /> Unduh
+                            </button>
+                            <button onClick={() => { handleShareImage(url); setOpenMenuIndex(null); }} className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-gray-50 rounded-lg text-sm font-medium text-gray-700 transition-colors">
+                              <Share2 className="w-4 h-4 text-gray-500" /> Bagikan
+                            </button>
+                            <button onClick={() => { handleSaveToCloud(url); setOpenMenuIndex(null); }} className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-gray-50 rounded-lg text-sm font-medium text-gray-700 transition-colors">
+                              <Cloud className="w-4 h-4 text-gray-500" /> Simpan ke Cloud
+                            </button>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </motion.div>
           </div>
         )}
       </AnimatePresence>
