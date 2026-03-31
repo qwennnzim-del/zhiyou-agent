@@ -98,6 +98,18 @@ export default function ZhiyouApp() {
   const [loadingTextIndex, setLoadingTextIndex] = useState(0);
   const [currentPrompt, setCurrentPrompt] = useState('');
   const [isImageAnalysisMode, setIsImageAnalysisMode] = useState(false);
+  const hasLoadedInitialChat = useRef(false);
+
+  const handleModelOrFeatureChange = (model: string, feature: 'chat' | 'image' | 'research' | 'learning' | 'imageSearch') => {
+    if (selectedModel !== model || featureMode !== feature) {
+      setSelectedModel(model);
+      setFeatureMode(feature);
+      if (messages.length > 0) {
+        createNewChat();
+      }
+    }
+  };
+
   const [openMenuIndex, setOpenMenuIndex] = useState<number | null>(null);
   const [isSavingToCloud, setIsSavingToCloud] = useState(false);
   const [savingProgress, setSavingProgress] = useState('');
@@ -497,7 +509,10 @@ export default function ZhiyouApp() {
   }, [user]);
 
   useEffect(() => {
-    if (!user) return;
+    if (!user) {
+      hasLoadedInitialChat.current = false;
+      return;
+    }
     
     const chatsRef = collection(db, 'users', user.uid, 'chats');
     const q = query(chatsRef, orderBy('updatedAt', 'desc'));
@@ -509,9 +524,10 @@ export default function ZhiyouApp() {
       })) as Chat[];
       setChatHistory(history);
       
-      if (!chatId && history.length > 0 && messages.length === 0) {
+      if (!hasLoadedInitialChat.current && !chatId && history.length > 0 && messages.length === 0) {
         setChatId(history[0].id);
         setMessages(history[0].messages || []);
+        hasLoadedInitialChat.current = true;
       }
     });
     
@@ -1224,10 +1240,12 @@ export default function ZhiyouApp() {
             </button>
             <button 
               onClick={createNewChat} 
-              className="p-2 hover:bg-gray-100 active:scale-90 rounded-full transition-all text-gray-600 hover:text-blue-600"
+              className="p-2 hover:bg-gray-100 active:scale-90 rounded-full transition-all text-gray-600 hover:text-blue-600 group"
               title={t('newChat')}
             >
-              <PlusCircle className="w-6 h-6" />
+              <div className="w-6 h-6 rounded-full border-[1.5px] border-dashed border-gray-400 group-hover:border-blue-500 flex items-center justify-center transition-colors">
+                <Plus className="w-4 h-4" />
+              </div>
             </button>
           </div>
           
@@ -1249,20 +1267,29 @@ export default function ZhiyouApp() {
               <div className="hidden sm:flex flex-col items-end">
                 {user.email === 'cipaonly08@gmail.com' ? (
                   <div className="relative p-[2px] rounded-full overflow-hidden">
-                    <div className="absolute inset-0 bg-gradient-to-r from-purple-500 via-pink-500 to-blue-500 animate-[spin_3s_linear_infinite]" />
+                    <div className="absolute inset-0 bg-gradient-to-r from-blue-500 via-orange-500 to-pink-500 animate-[spin_3s_linear_infinite]" />
                     <div className="bg-white rounded-full px-3 py-1 relative z-10 flex items-center gap-1.5">
-                      <span className="text-sm font-bold bg-gradient-to-r from-purple-600 to-blue-600 bg-clip-text text-transparent">
+                      <span className="text-sm font-bold bg-gradient-to-r from-blue-600 to-pink-600 bg-clip-text text-transparent">
                         {user.displayName || 'Pro User'}
                       </span>
-                      <Crown className="w-3.5 h-3.5 text-purple-500" />
+                      <Crown className="w-3.5 h-3.5 text-orange-500" />
                     </div>
                   </div>
                 ) : (
                   <span className="text-sm font-medium text-gray-900">{user.displayName || 'User'}</span>
                 )}
               </div>
-              <Link href="/settings">
-                <img src={user.photoURL || `https://ui-avatars.com/api/?name=${user.displayName || 'User'}&background=random`} alt="Profile" className={`w-8 h-8 rounded-full border-2 transition-transform cursor-pointer hover:scale-105 ${user.email === 'cipaonly08@gmail.com' ? 'border-purple-500' : 'border-gray-200'}`} />
+              <Link href="/settings" className="group">
+                {user.email === 'cipaonly08@gmail.com' ? (
+                  <div className="relative p-[2.5px] rounded-full overflow-hidden flex items-center justify-center transition-transform group-hover:scale-105">
+                    <div className="absolute inset-0 bg-gradient-to-r from-blue-500 via-orange-500 to-pink-500 animate-[spin_3s_linear_infinite]" />
+                    <div className="bg-white rounded-full p-[3px] relative z-10">
+                      <img src={user.photoURL || `https://ui-avatars.com/api/?name=${user.displayName || 'User'}&background=random`} alt="Profile" className="w-8 h-8 rounded-full" />
+                    </div>
+                  </div>
+                ) : (
+                  <img src={user.photoURL || `https://ui-avatars.com/api/?name=${user.displayName || 'User'}&background=random`} alt="Profile" className="w-8 h-8 rounded-full border-2 border-gray-200 transition-transform cursor-pointer hover:scale-105" />
+                )}
               </Link>
             </div>
           ) : (
@@ -1767,7 +1794,7 @@ export default function ZhiyouApp() {
                             transition={{ duration: 0.15 }}
                             className="absolute bottom-full left-0 mb-2 bg-white rounded-2xl shadow-xl border border-gray-100 p-1.5 flex flex-col gap-0.5 z-50 min-w-[200px] sm:min-w-[240px]"
                           >
-                            <button onClick={() => { setFeatureMode('image'); setSelectedModel('zhiyou-art-2.0'); setIsFeatureMenuOpen(false); }} className="flex items-center gap-3 px-3 py-2.5 hover:bg-gray-50 active:scale-[0.98] rounded-xl text-sm font-medium text-gray-700 transition-all text-left">
+                            <button onClick={() => { handleModelOrFeatureChange('zhiyou-art-2.0', 'image'); setIsFeatureMenuOpen(false); }} className="flex items-center gap-3 px-3 py-2.5 hover:bg-gray-50 active:scale-[0.98] rounded-xl text-sm font-medium text-gray-700 transition-all text-left">
                               <div className="w-8 h-8 rounded-lg bg-pink-50 flex items-center justify-center relative">
                                 <ImageIcon className="w-4 h-4 text-pink-500" />
                               </div>
@@ -1778,7 +1805,7 @@ export default function ZhiyouApp() {
                                 </div>
                               </div>
                             </button>
-                            <button onClick={() => { setFeatureMode('imageSearch'); setSelectedModel('zhiyou-art'); setIsFeatureMenuOpen(false); }} className="flex items-center gap-3 px-3 py-2.5 hover:bg-gray-50 active:scale-[0.98] rounded-xl text-sm font-medium text-gray-700 transition-all text-left">
+                            <button onClick={() => { handleModelOrFeatureChange('zhiyou-art', 'imageSearch'); setIsFeatureMenuOpen(false); }} className="flex items-center gap-3 px-3 py-2.5 hover:bg-gray-50 active:scale-[0.98] rounded-xl text-sm font-medium text-gray-700 transition-all text-left">
                               <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center relative">
                                 <Search className="w-4 h-4 text-blue-500" />
                               </div>
@@ -1789,7 +1816,7 @@ export default function ZhiyouApp() {
                                 </div>
                               </div>
                             </button>
-                            <button onClick={() => { setFeatureMode('research'); setIsSearchEnabled(true); setIsFeatureMenuOpen(false); }} className="flex items-center gap-3 px-3 py-2.5 hover:bg-gray-50 active:scale-[0.98] rounded-xl text-sm font-medium text-gray-700 transition-all text-left">
+                            <button onClick={() => { handleModelOrFeatureChange(selectedModel, 'research'); setIsSearchEnabled(true); setIsFeatureMenuOpen(false); }} className="flex items-center gap-3 px-3 py-2.5 hover:bg-gray-50 active:scale-[0.98] rounded-xl text-sm font-medium text-gray-700 transition-all text-left">
                               <div className="w-8 h-8 rounded-lg bg-indigo-50 flex items-center justify-center">
                                 <Search className="w-4 h-4 text-indigo-500" />
                               </div>
@@ -2015,7 +2042,7 @@ export default function ZhiyouApp() {
               
               <div className="space-y-3">
                 <button 
-                  onClick={() => { setSelectedModel('gemini-2.5-flash'); if (featureMode === 'imageSearch' || featureMode === 'image') setFeatureMode('chat'); setIsModelMenuOpen(false); }}
+                  onClick={() => { handleModelOrFeatureChange('gemini-2.5-flash', (featureMode === 'imageSearch' || featureMode === 'image') ? 'chat' : featureMode); setIsModelMenuOpen(false); }}
                   className={`w-full flex items-center justify-between p-4 rounded-2xl border transition-all active:scale-[0.98] ${selectedModel === 'gemini-2.5-flash' ? 'border-blue-500 bg-blue-50/30' : 'border-gray-200 hover:border-blue-300 hover:bg-gray-50'}`}
                 >
                   <div className="flex items-center gap-4">
@@ -2031,7 +2058,7 @@ export default function ZhiyouApp() {
                 </button>
 
                 <button 
-                  onClick={() => { setSelectedModel('zhiyou-3'); if (featureMode === 'imageSearch' || featureMode === 'image') setFeatureMode('chat'); setIsModelMenuOpen(false); }}
+                  onClick={() => { handleModelOrFeatureChange('zhiyou-3', (featureMode === 'imageSearch' || featureMode === 'image') ? 'chat' : featureMode); setIsModelMenuOpen(false); }}
                   className={`w-full flex items-center justify-between p-4 rounded-2xl border transition-all active:scale-[0.98] ${selectedModel === 'zhiyou-3' ? 'border-amber-500 bg-amber-50/30' : 'border-gray-200 hover:border-amber-300 hover:bg-gray-50'}`}
                 >
                   <div className="flex items-center gap-4">
@@ -2051,7 +2078,7 @@ export default function ZhiyouApp() {
                 </button>
 
                 <button 
-                  onClick={() => { setSelectedModel('zhiyou-art'); setFeatureMode('imageSearch'); setIsModelMenuOpen(false); }}
+                  onClick={() => { handleModelOrFeatureChange('zhiyou-art', 'imageSearch'); setIsModelMenuOpen(false); }}
                   className={`w-full flex items-center justify-between p-4 rounded-2xl border transition-all active:scale-[0.98] ${selectedModel === 'zhiyou-art' ? 'border-purple-500 bg-purple-50/30' : 'border-gray-200 hover:border-purple-300 hover:bg-gray-50'}`}
                 >
                   <div className="flex items-center gap-4">
@@ -2070,7 +2097,7 @@ export default function ZhiyouApp() {
                 </button>
 
                 <button 
-                  onClick={() => { setSelectedModel('zhiyou-art-2.0'); setFeatureMode('image'); setIsModelMenuOpen(false); }}
+                  onClick={() => { handleModelOrFeatureChange('zhiyou-art-2.0', 'image'); setIsModelMenuOpen(false); }}
                   className={`w-full flex items-center justify-between p-4 rounded-2xl border transition-all active:scale-[0.98] ${selectedModel === 'zhiyou-art-2.0' ? 'border-pink-500 bg-pink-50/30' : 'border-gray-200 hover:border-pink-300 hover:bg-gray-50'}`}
                 >
                   <div className="flex items-center gap-4">
