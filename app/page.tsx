@@ -13,6 +13,7 @@ import { collection, doc, setDoc, getDoc, onSnapshot, query, orderBy, serverTime
 import { ref, uploadString, getDownloadURL } from 'firebase/storage';
 import { useRouter } from 'next/navigation';
 import { useLanguage } from './contexts/LanguageContext';
+import Image from 'next/image';
 
 const ai = new GoogleGenAI({ apiKey: process.env.NEXT_PUBLIC_GEMINI_API_KEY });
 
@@ -34,6 +35,7 @@ type Message = {
   role: 'user' | 'model';
   text: string;
   reasoning?: string;
+  isReasoningExpanded?: boolean;
   attachments?: Attachment[];
   sources?: Source[];
   imageResults?: string[];
@@ -94,7 +96,6 @@ export default function ZhiyouApp() {
   const [copiedMessageIndex, setCopiedMessageIndex] = useState<number | null>(null);
   const [likedMessageIndex, setLikedMessageIndex] = useState<number | null>(null);
   const [sharedMessageIndex, setSharedMessageIndex] = useState<number | null>(null);
-  const [showReasoningFor, setShowReasoningFor] = useState<number | null>(null);
   const [loadingTextIndex, setLoadingTextIndex] = useState(0);
   const [currentPrompt, setCurrentPrompt] = useState('');
   const [isImageAnalysisMode, setIsImageAnalysisMode] = useState(false);
@@ -133,6 +134,7 @@ export default function ZhiyouApp() {
   const thinkingTexts = ["thinking...", "processing...", "analyzing..."];
   const searchingTexts = ["searching...", "browsing the web...", "finding sources..."];
   const researchTexts = ["conducting research...", "analyzing sources...", "synthesizing data...", "writing report..."];
+  const learningTexts = ["preparing lesson...", "gathering sources...", "structuring guide...", "simplifying concepts..."];
 
   const handleDownload = async (url: string) => {
     try {
@@ -168,7 +170,7 @@ export default function ZhiyouApp() {
       }
       
       // Create image object to draw on canvas
-      const img = new Image();
+      const img = new window.Image();
       const objectUrl = URL.createObjectURL(blob);
       
       await new Promise((resolve, reject) => {
@@ -606,21 +608,50 @@ export default function ZhiyouApp() {
     const files = e.target.files;
     if (!files) return;
 
+    const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB
+    const ALLOWED_TYPES = [
+      'image/png', 'image/jpeg', 'image/webp', 'image/heic', 'image/heif',
+      'audio/wav', 'audio/mp3', 'audio/aiff', 'audio/aac', 'audio/ogg', 'audio/flac', 'audio/mpeg',
+      'video/mp4', 'video/mpeg', 'video/mov', 'video/avi', 'video/x-flv', 'video/mpg', 'video/webm', 'video/wmv', 'video/3gpp',
+      'text/plain', 'text/html', 'text/css', 'text/javascript', 'application/x-javascript', 'text/x-typescript', 'application/x-typescript', 'text/csv', 'text/markdown', 'text/x-python', 'application/x-python-code', 'application/json', 'text/xml', 'application/rtf', 'text/rtf',
+      'application/pdf'
+    ];
+
     const newAttachments: Attachment[] = [];
+
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
-      const base64 = await fileToBase64(file);
-      newAttachments.push({
-        file,
-        base64,
-        mimeType: file.type,
-        name: file.name,
-        size: formatSize(file.size),
-        previewUrl: file.type.startsWith('image/') ? URL.createObjectURL(file) : undefined
-      });
+      
+      if (file.size > MAX_FILE_SIZE) {
+        showToast(`${t('fileTooLarge')} (${file.name})`, 'error');
+        continue;
+      }
+
+      if (!ALLOWED_TYPES.includes(file.type) && !file.type.startsWith('text/')) {
+        showToast(`${t('fileTypeNotSupported')} (${file.name})`, 'error');
+        continue;
+      }
+
+      try {
+        const base64 = await fileToBase64(file);
+        newAttachments.push({
+          file,
+          base64,
+          mimeType: file.type || 'text/plain',
+          name: file.name,
+          size: formatSize(file.size),
+          previewUrl: file.type.startsWith('image/') ? URL.createObjectURL(file) : undefined
+        });
+      } catch (err) {
+        console.error("Error reading file:", err);
+        showToast(`${t('fileReadError')} (${file.name})`, 'error');
+      }
     }
 
-    setAttachments(prev => [...prev, ...newAttachments]);
+    if (newAttachments.length > 0) {
+      setAttachments(prev => [...prev, ...newAttachments]);
+    }
+    
     setIsAttachmentMenuOpen(false);
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
@@ -650,6 +681,14 @@ export default function ZhiyouApp() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  const toggleReasoning = (index: number) => {
+    setMessages(prev => {
+      const newMessages = [...prev];
+      newMessages[index].isReasoningExpanded = !newMessages[index].isReasoningExpanded;
+      return newMessages;
+    });
+  };
 
   const handleInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setInput(e.target.value);
@@ -817,6 +856,8 @@ export default function ZhiyouApp() {
       
       if (featureMode === 'research') {
         systemInstruction += '\n\n[MODE RISET (DEEP RESEARCH) AKTIF]: ' + t('systemPromptResearch');
+      } else if (featureMode === 'learning') {
+        systemInstruction += '\n\n[MODE PEMBELAJARAN TERPANDU (GUIDED LEARNING) AKTIF]: ' + t('systemPromptLearning');
       } else if (selectedModel === 'zhiyou-3') {
         systemInstruction += '\n\n[MODE PENALARAN TINGGI AKTIF]: ' + t('systemPromptReasoning') + '\n\nAnda diinstruksikan untuk bertindak sebagai model dengan kemampuan penalaran tingkat tinggi (Pro). Analisis setiap masalah secara mendalam, berpikir selangkah demi selangkah (step-by-step), dan berikan jawaban yang sangat komprehensif, akurat, logis, dan terstruktur dengan baik.';
       } else if (selectedModel === 'zhiyou-art' || selectedModel === 'zhiyou-art-2.0') {
@@ -827,9 +868,11 @@ export default function ZhiyouApp() {
         systemInstruction: systemInstruction,
       };
 
-      if (selectedModel === 'zhiyou-3' || featureMode === 'research') {
+      if (selectedModel === 'zhiyou-3' || featureMode === 'research' || featureMode === 'learning') {
         if (featureMode === 'research') {
           config.temperature = 0.4; // Slightly higher than reasoning for more creative synthesis
+        } else if (featureMode === 'learning') {
+          config.temperature = 0.5; // Balanced temperature for tutoring and explanation
         } else {
           config.temperature = 0.2; // Lower temperature for more focused, analytical reasoning
         }
@@ -838,7 +881,7 @@ export default function ZhiyouApp() {
         config.temperature = 0.7; // Standard temperature for normal chat
       }
 
-      if (isSearchEnabled || featureMode === 'research') {
+      if (isSearchEnabled || featureMode === 'research' || featureMode === 'learning') {
         config.tools = [{ googleSearch: {} }];
       }
 
@@ -978,7 +1021,7 @@ export default function ZhiyouApp() {
       } else {
         if (selectedModel === 'zhiyou-3') {
           const responseStream = await ai.models.generateContentStream({
-            model: 'gemini-3.1-pro-preview',
+            model: 'gemini-2.5-flash',
             contents: contents,
             config: config
           });
@@ -998,16 +1041,19 @@ export default function ZhiyouApp() {
             
             let displayText = fullText;
             let reasoningText = '';
+            let isReasoningExpanded = true;
             
             if (fullText.includes('<think>') && fullText.includes('</think>')) {
               const parts = fullText.split('</think>');
               if (parts.length > 1) {
                 reasoningText = parts[0].replace('<think>', '').trim();
                 displayText = parts[1].trim();
+                isReasoningExpanded = false; // Auto-collapse when thinking is done
               }
             } else if (fullText.includes('<think>')) {
                reasoningText = fullText.replace('<think>', '').trim();
                displayText = '';
+               isReasoningExpanded = true; // Keep expanded while thinking
             }
             
             const chunks = c.candidates?.[0]?.groundingMetadata?.groundingChunks;
@@ -1027,6 +1073,7 @@ export default function ZhiyouApp() {
               newMessages[newMessages.length - 1].text = displayText;
               if (reasoningText) {
                 newMessages[newMessages.length - 1].reasoning = reasoningText;
+                newMessages[newMessages.length - 1].isReasoningExpanded = isReasoningExpanded;
               }
               newMessages[newMessages.length - 1].sources = sources;
               return newMessages;
@@ -1284,11 +1331,11 @@ export default function ZhiyouApp() {
                   <div className="relative p-[2.5px] rounded-full overflow-hidden flex items-center justify-center transition-transform group-hover:scale-105">
                     <div className="absolute inset-0 bg-gradient-to-r from-blue-500 via-orange-500 to-pink-500 animate-[spin_3s_linear_infinite]" />
                     <div className="bg-white rounded-full p-[3px] relative z-10">
-                      <img src={user.photoURL || `https://ui-avatars.com/api/?name=${user.displayName || 'User'}&background=random`} alt="Profile" className="w-8 h-8 rounded-full" />
+                      <Image src={user.photoURL || `https://ui-avatars.com/api/?name=${user.displayName || 'User'}&background=random`} alt="Profile" width={32} height={32} className="w-8 h-8 rounded-full" referrerPolicy="no-referrer" />
                     </div>
                   </div>
                 ) : (
-                  <img src={user.photoURL || `https://ui-avatars.com/api/?name=${user.displayName || 'User'}&background=random`} alt="Profile" className="w-8 h-8 rounded-full border-2 border-gray-200 transition-transform cursor-pointer hover:scale-105" />
+                  <Image src={user.photoURL || `https://ui-avatars.com/api/?name=${user.displayName || 'User'}&background=random`} alt="Profile" width={32} height={32} className="w-8 h-8 rounded-full border-2 border-gray-200 transition-transform cursor-pointer hover:scale-105" referrerPolicy="no-referrer" />
                 )}
               </Link>
             </div>
@@ -1380,7 +1427,7 @@ export default function ZhiyouApp() {
                               <div key={i} className="flex items-center gap-2 bg-white/60 border border-gray-200/60 rounded-xl p-2 shadow-sm">
                                 {att.previewUrl ? (
                                   <div className="w-10 h-10 rounded-lg overflow-hidden bg-gray-100 flex-shrink-0">
-                                    <img src={att.previewUrl} alt="preview" className="w-full h-full object-cover" />
+                                    <Image src={att.previewUrl} alt="preview" fill className="object-cover" referrerPolicy="no-referrer" />
                                   </div>
                                 ) : (
                                   <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0">
@@ -1427,10 +1474,12 @@ export default function ZhiyouApp() {
                                       setShowImagesFor(msg.imageResults!);
                                     }}
                                   >
-                                    <img 
+                                    <Image 
                                       src={url || 'https://picsum.photos/seed/error/400/400'} 
                                       alt={`Result ${i+1}`} 
-                                      className={`w-full h-full object-cover transition-transform duration-700 ${isLastAndMore ? 'blur-sm brightness-75' : 'group-hover:scale-110'}`} 
+                                      fill
+                                      className={`object-cover transition-transform duration-700 ${isLastAndMore ? 'blur-sm brightness-75' : 'group-hover:scale-110'}`} 
+                                      referrerPolicy="no-referrer"
                                       onError={(e) => {
                                         const target = e.target as HTMLImageElement;
                                         if (url && !target.src.includes('/api/proxy-image')) {
@@ -1504,6 +1553,10 @@ export default function ZhiyouApp() {
                                   <span className="relative z-10 font-medium text-sm tracking-wide text-indigo-600 drop-shadow-sm">
                                     {researchTexts[loadingTextIndex % researchTexts.length]}
                                   </span>
+                                ) : featureMode === 'learning' ? (
+                                  <span className="relative z-10 font-medium text-sm tracking-wide text-emerald-600 drop-shadow-sm">
+                                    {learningTexts[loadingTextIndex % learningTexts.length]}
+                                  </span>
                                 ) : isSearchEnabled ? (
                                   <span className="relative z-10 font-medium text-sm tracking-wide bg-google-gradient drop-shadow-sm">
                                     {searchingTexts[loadingTextIndex % searchingTexts.length]}
@@ -1522,23 +1575,23 @@ export default function ZhiyouApp() {
                             {msg.reasoning && (
                               <div className="mb-4">
                                 <button 
-                                  onClick={() => setShowReasoningFor(showReasoningFor === idx ? null : idx)}
+                                  onClick={() => toggleReasoning(idx)}
                                   className="flex items-center gap-2 text-xs font-medium text-gray-500 hover:text-gray-700 transition-colors bg-gray-50 hover:bg-gray-100 px-3 py-1.5 rounded-full border border-gray-200"
                                 >
                                   <Brain className="w-3.5 h-3.5" />
-                                  Proses Penalaran
-                                  <ChevronDown className={`w-3 h-3 transition-transform ${showReasoningFor === idx ? 'rotate-180' : ''}`} />
+                                  {t('reasoningProcess')}
+                                  <ChevronDown className={`w-3 h-3 transition-transform ${msg.isReasoningExpanded ? 'rotate-180' : ''}`} />
                                 </button>
                                 
                                 <AnimatePresence>
-                                  {showReasoningFor === idx && (
+                                  {msg.isReasoningExpanded && (
                                     <motion.div
                                       initial={{ height: 0, opacity: 0 }}
                                       animate={{ height: 'auto', opacity: 1 }}
                                       exit={{ height: 0, opacity: 0 }}
                                       className="overflow-hidden mt-2"
                                     >
-                                      <div className="p-4 bg-gray-50/80 rounded-xl border border-gray-100 text-sm text-gray-500 italic leading-relaxed whitespace-pre-wrap">
+                                      <div className="p-4 bg-gray-50/80 rounded-xl border-l-4 border-l-gray-300 border-y border-r border-y-gray-100 border-r-gray-100 text-sm text-gray-500 italic leading-relaxed whitespace-pre-wrap">
                                         {msg.reasoning}
                                       </div>
                                     </motion.div>
@@ -1627,8 +1680,8 @@ export default function ZhiyouApp() {
                     {attachments.map((att, idx) => (
                       <div key={idx} className="relative flex items-center gap-2 bg-white border border-gray-200 rounded-xl p-2 pr-8 shadow-sm group">
                         {att.previewUrl ? (
-                          <div className="w-10 h-10 rounded-lg overflow-hidden bg-gray-100 flex-shrink-0">
-                            <img src={att.previewUrl} alt="preview" className="w-full h-full object-cover" />
+                          <div className="w-10 h-10 rounded-lg overflow-hidden bg-gray-100 flex-shrink-0 relative">
+                            <Image src={att.previewUrl} alt="preview" fill className="object-cover" referrerPolicy="no-referrer" />
                           </div>
                         ) : (
                           <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0">
@@ -1704,7 +1757,9 @@ export default function ZhiyouApp() {
                       ? "Apa yang ingin diketahui pada gambar ini?" 
                       : (featureMode === 'image' || featureMode === 'imageSearch' || selectedModel === 'zhiyou-art' || selectedModel === 'zhiyou-art-2.0') 
                         ? "Cari gambar atau upload gambar referensi" 
-                        : t('askAnything')
+                        : featureMode === 'learning'
+                          ? t('askLearning')
+                          : t('askAnything')
                   }
                   className={`w-full bg-transparent resize-none outline-none max-h-48 min-h-[40px] text-gray-800 placeholder:text-gray-500 text-base transition-opacity duration-300 ${input.length > 0 ? 'opacity-100' : 'opacity-70'}`}
                   rows={1}
@@ -1822,7 +1877,7 @@ export default function ZhiyouApp() {
                               </div>
                               {t('featureDeepResearch')}
                             </button>
-                            <button onClick={() => { showToast(t('featureComingSoon'), 'info'); setIsFeatureMenuOpen(false); }} className="flex items-center gap-3 px-3 py-2.5 hover:bg-gray-50 active:scale-[0.98] rounded-xl text-sm font-medium text-gray-700 transition-all text-left">
+                            <button onClick={() => { handleModelOrFeatureChange(selectedModel, 'learning'); setIsSearchEnabled(true); setIsFeatureMenuOpen(false); }} className="flex items-center gap-3 px-3 py-2.5 hover:bg-gray-50 active:scale-[0.98] rounded-xl text-sm font-medium text-gray-700 transition-all text-left">
                               <div className="w-8 h-8 rounded-lg bg-emerald-50 flex items-center justify-center">
                                 <BookOpen className="w-4 h-4 text-emerald-500" />
                               </div>
@@ -1968,11 +2023,13 @@ export default function ZhiyouApp() {
               <div className="overflow-y-auto flex-1 pr-2 -mr-2 space-y-6">
                 {showImagesFor.map((url, idx) => (
                   <div key={idx} className="flex flex-col gap-3">
-                    <div className="w-full rounded-2xl overflow-hidden border border-gray-100 shadow-sm bg-gray-50">
-                      <img 
+                    <div className="w-full rounded-2xl overflow-hidden border border-gray-100 shadow-sm bg-gray-50 relative min-h-[400px]">
+                      <Image 
                         src={url} 
                         alt={`Result ${idx + 1}`} 
-                        className="w-full h-auto object-contain max-h-[60vh]"
+                        fill
+                        className="object-contain max-h-[60vh]"
+                        referrerPolicy="no-referrer"
                         onError={(e) => {
                           const target = e.target as HTMLImageElement;
                           if (url && !target.src.includes('/api/proxy-image')) {
