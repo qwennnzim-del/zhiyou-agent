@@ -1,11 +1,11 @@
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Menu, Plus, PlusCircle, Wand2, ArrowUp, ChevronDown, X, Settings, HelpCircle, LogIn, Image as ImageIcon, Video, FileText, Paperclip, ArrowLeft, BookOpen, Search, Trash2, Globe, ThumbsUp, Copy, Check, Share2, MoreHorizontal, Download, Cloud, Brain, Zap, Crown, Maximize2, MoreVertical } from 'lucide-react';
+import { Menu, Plus, PlusCircle, Wand2, ArrowUp, ChevronDown, X, Settings, HelpCircle, LogIn, Image as ImageIcon, Video, FileText, Paperclip, ArrowLeft, BookOpen, Search, Trash2, Globe, ThumbsUp, Copy, Check, Share2, MoreHorizontal, Download, Cloud, Brain, Zap, Crown, Maximize2, MoreVertical, CheckCircle2, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { GoogleGenAI } from '@google/genai';
+import { GoogleGenAI, Type, FunctionDeclaration } from '@google/genai';
 import Link from 'next/link';
 import { auth, db, storage } from './lib/firebase';
 import { onAuthStateChanged, signOut, User } from 'firebase/auth';
@@ -81,11 +81,16 @@ export default function ZhiyouApp() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [selectedModel, setSelectedModel] = useState('gemini-2.5-flash');
   const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
   const [isAttachmentMenuOpen, setIsAttachmentMenuOpen] = useState(false);
   const [isFeatureMenuOpen, setIsFeatureMenuOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [chatToDelete, setChatToDelete] = useState<string | null>(null);
   const [isTyping, setIsTyping] = useState(false);
+  const [editingMessageIndex, setEditingMessageIndex] = useState<number | null>(null);
+  const [clickedMessageIndex, setClickedMessageIndex] = useState<number | null>(null);
+  const [editPromptValue, setEditPromptValue] = useState('');
   const [isModelMenuOpen, setIsModelMenuOpen] = useState(false);
   const [isSearchEnabled, setIsSearchEnabled] = useState(false);
   const [featureMode, setFeatureMode] = useState<'chat' | 'image' | 'research' | 'learning' | 'imageSearch'>('chat');
@@ -591,9 +596,19 @@ export default function ZhiyouApp() {
     return name.substring(0, 12) + '...';
   };
 
-  const fileToBase64 = (file: File): Promise<string> => {
+  const fileToBase64 = (file: File, onProgress?: (progress: number) => void): Promise<string> => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
+      
+      if (onProgress) {
+        reader.onprogress = (event) => {
+          if (event.lengthComputable) {
+            const percentLoaded = Math.round((event.loaded / event.total) * 100);
+            onProgress(percentLoaded);
+          }
+        };
+      }
+      
       reader.readAsDataURL(file);
       reader.onload = () => {
         if (typeof reader.result === 'string') {
@@ -619,6 +634,9 @@ export default function ZhiyouApp() {
 
     const newAttachments: Attachment[] = [];
 
+    setIsUploading(true);
+    setUploadProgress(0);
+
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
       
@@ -633,7 +651,11 @@ export default function ZhiyouApp() {
       }
 
       try {
-        const base64 = await fileToBase64(file);
+        const base64 = await fileToBase64(file, (progress) => {
+          // Calculate overall progress if multiple files
+          const overallProgress = Math.round(((i * 100) + progress) / files.length);
+          setUploadProgress(overallProgress);
+        });
         newAttachments.push({
           file,
           base64,
@@ -652,6 +674,8 @@ export default function ZhiyouApp() {
       setAttachments(prev => [...prev, ...newAttachments]);
     }
     
+    setIsUploading(false);
+    setUploadProgress(0);
     setIsAttachmentMenuOpen(false);
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
@@ -704,11 +728,25 @@ export default function ZhiyouApp() {
     }
   };
 
-  const handleSend = async () => {
-    if ((!input.trim() && attachments.length === 0) || isLoading) return;
+  const handleEditPrompt = (index: number) => {
+    if (!editPromptValue.trim() || isLoading) return;
     
-    const userText = input.trim();
-    const currentAttachments = [...attachments];
+    const msgToEdit = messages[index];
+    const newMessages = messages.slice(0, index);
+    
+    setEditingMessageIndex(null);
+    handleSend(editPromptValue, msgToEdit.attachments || [], newMessages);
+  };
+
+  const handleSend = async (overrideText?: string, overrideAttachments?: Attachment[], overrideMessages?: Message[]) => {
+    const textToSend = overrideText !== undefined ? overrideText : input;
+    const attachmentsToSend = overrideAttachments !== undefined ? overrideAttachments : attachments;
+    const currentMessages = overrideMessages !== undefined ? overrideMessages : messages;
+
+    if ((!textToSend.trim() && attachmentsToSend.length === 0) || isLoading) return;
+    
+    const userText = textToSend.trim();
+    const currentAttachments = [...attachmentsToSend];
     
     let finalPrompt = userText;
     const hasImageAttachments = currentAttachments.some(att => att.mimeType.startsWith('image/'));
@@ -720,20 +758,21 @@ export default function ZhiyouApp() {
     const isImageFeatureMode = (featureMode === 'image' || featureMode === 'imageSearch' || selectedModel === 'zhiyou-art' || selectedModel === 'zhiyou-art-2.0');
 
     setCurrentPrompt(userText);
-    setInput('');
-    setAttachments([]);
+    if (overrideText === undefined) setInput('');
+    if (overrideAttachments === undefined) setAttachments([]);
     setIsImageAnalysisMode(false);
-    if (textareaRef.current) {
+    if (textareaRef.current && overrideText === undefined) {
       textareaRef.current.style.height = 'auto';
     }
     
-    setMessages(prev => [...prev, { role: 'user', text: userText, attachments: currentAttachments }]);
+    const newMessagesList = [...currentMessages, { role: 'user' as const, text: userText, attachments: currentAttachments }];
+    setMessages(newMessagesList);
     setIsLoading(true);
     setIsThinking(true);
     setLoadingTextIndex(0);
     
     // Add empty model message immediately so loader shows up
-    setMessages(prev => [...prev, { role: 'model', text: '', sources: [], model: selectedModel }]);
+    setMessages([...newMessagesList, { role: 'model', text: '', sources: [], model: selectedModel }]);
     
     try {
       // If it's an image feature and no text but has image, generate prompt from image
@@ -881,8 +920,43 @@ export default function ZhiyouApp() {
         config.temperature = 0.7; // Standard temperature for normal chat
       }
 
+      const getCurrentTime: FunctionDeclaration = {
+        name: "getCurrentTime",
+        description: "Get the current date and time in a specific timezone",
+        parameters: {
+          type: Type.OBJECT,
+          properties: {
+            timezone: {
+              type: Type.STRING,
+              description: "The timezone to get the time for, e.g. 'Asia/Jakarta', 'America/New_York', 'UTC'"
+            }
+          },
+          required: ["timezone"]
+        }
+      };
+
+      const calculateMath: FunctionDeclaration = {
+        name: "calculateMath",
+        description: "Evaluate a mathematical expression",
+        parameters: {
+          type: Type.OBJECT,
+          properties: {
+            expression: {
+              type: Type.STRING,
+              description: "The mathematical expression to evaluate, e.g. '2 + 2', '100 * 5 / 2'"
+            }
+          },
+          required: ["expression"]
+        }
+      };
+
+      config.tools = [
+        { functionDeclarations: [getCurrentTime, calculateMath] }
+      ];
+
       if (isSearchEnabled || featureMode === 'research' || featureMode === 'learning') {
-        config.tools = [{ googleSearch: {} }];
+        config.tools.push({ googleSearch: {} });
+        config.toolConfig = { includeServerSideToolInvocations: true };
       }
 
       let fullText = '';
@@ -1019,14 +1093,18 @@ export default function ZhiyouApp() {
           });
         }
       } else {
-        if (selectedModel === 'zhiyou-3') {
+        let isDone = false;
+        let currentContents = [...contents];
+        
+        while (!isDone) {
           const responseStream = await ai.models.generateContentStream({
-            model: 'gemini-2.5-flash',
-            contents: contents,
+            model: 'gemini-2.5-flash', // Always use 2.5 flash
+            contents: currentContents,
             config: config
           });
           
           let firstChunk = true;
+          let functionCallsToHandle: any[] = [];
           
           for await (const chunk of responseStream) {
             if (firstChunk) {
@@ -1035,6 +1113,11 @@ export default function ZhiyouApp() {
             }
             
             const c = chunk as any;
+            
+            if (c.functionCalls && c.functionCalls.length > 0) {
+              functionCallsToHandle.push(...c.functionCalls);
+            }
+            
             if (c.text) {
               fullText += c.text;
             }
@@ -1043,17 +1126,19 @@ export default function ZhiyouApp() {
             let reasoningText = '';
             let isReasoningExpanded = true;
             
-            if (fullText.includes('<think>') && fullText.includes('</think>')) {
-              const parts = fullText.split('</think>');
-              if (parts.length > 1) {
-                reasoningText = parts[0].replace('<think>', '').trim();
-                displayText = parts[1].trim();
-                isReasoningExpanded = false; // Auto-collapse when thinking is done
+            if (selectedModel === 'zhiyou-3') {
+              if (fullText.includes('<think>') && fullText.includes('</think>')) {
+                const parts = fullText.split('</think>');
+                if (parts.length > 1) {
+                  reasoningText = parts[0].replace('<think>', '').trim();
+                  displayText = parts[1].trim();
+                  isReasoningExpanded = false; // Auto-collapse when thinking is done
+                }
+              } else if (fullText.includes('<think>')) {
+                 reasoningText = fullText.replace('<think>', '').trim();
+                 displayText = '';
+                 isReasoningExpanded = true; // Keep expanded while thinking
               }
-            } else if (fullText.includes('<think>')) {
-               reasoningText = fullText.replace('<think>', '').trim();
-               displayText = '';
-               isReasoningExpanded = true; // Keep expanded while thinking
             }
             
             const chunks = c.candidates?.[0]?.groundingMetadata?.groundingChunks;
@@ -1071,7 +1156,7 @@ export default function ZhiyouApp() {
             setMessages(prev => {
               const newMessages = [...prev];
               newMessages[newMessages.length - 1].text = displayText;
-              if (reasoningText) {
+              if (selectedModel === 'zhiyou-3' && reasoningText) {
                 newMessages[newMessages.length - 1].reasoning = reasoningText;
                 newMessages[newMessages.length - 1].isReasoningExpanded = isReasoningExpanded;
               }
@@ -1079,44 +1164,53 @@ export default function ZhiyouApp() {
               return newMessages;
             });
           }
-        } else {
-          const responseStream = await ai.models.generateContentStream({
-            model: 'gemini-2.5-flash', // Use gemini-2.5-flash for both to avoid quota limits
-            contents: contents,
-            config: config
-          });
           
-          let firstChunk = true;
-          
-          for await (const chunk of responseStream) {
-            if (firstChunk) {
-              setIsThinking(false);
-              firstChunk = false;
-            }
-            
-            const c = chunk as any;
-            if (c.text) {
-              fullText += c.text;
-            }
-            
-            const chunks = c.candidates?.[0]?.groundingMetadata?.groundingChunks;
-            if (chunks) {
-              chunks.forEach((gc: any) => {
-                if (gc.web?.uri && gc.web?.title) {
-                  // Avoid duplicates
-                  if (!sources.find(s => s.uri === gc.web.uri)) {
-                    sources.push({ uri: gc.web.uri, title: gc.web.title });
-                  }
-                }
-              });
-            }
-
-            setMessages(prev => {
-              const newMessages = [...prev];
-              newMessages[newMessages.length - 1].text = fullText;
-              newMessages[newMessages.length - 1].sources = sources;
-              return newMessages;
+          if (functionCallsToHandle.length > 0) {
+            // Append model's function call to history
+            currentContents.push({
+              role: 'model',
+              parts: functionCallsToHandle.map(call => ({ functionCall: call }))
             });
+            
+            // Execute functions
+            const functionResponses = functionCallsToHandle.map(call => {
+              let result: any;
+              if (call.name === 'getCurrentTime') {
+                try {
+                  const date = new Date();
+                  result = { time: date.toLocaleString('en-US', { timeZone: call.args.timezone || 'UTC' }) };
+                } catch (e) {
+                  result = { error: 'Invalid timezone' };
+                }
+              } else if (call.name === 'calculateMath') {
+                try {
+                  // Safe math evaluation
+                  const expr = call.args.expression.replace(/[^0-9+\-*/(). ]/g, '');
+                  result = { result: new Function('return ' + expr)() };
+                } catch (e) {
+                  result = { error: 'Invalid expression' };
+                }
+              } else {
+                result = { error: 'Unknown function' };
+              }
+              
+              return {
+                functionResponse: {
+                  name: call.name,
+                  response: result
+                }
+              };
+            });
+            
+            // Append function responses to history
+            currentContents.push({
+              role: 'user',
+              parts: functionResponses
+            });
+            
+            // Loop continues to get the final response
+          } else {
+            isDone = true;
           }
         }
       }
@@ -1266,13 +1360,13 @@ export default function ZhiyouApp() {
             
             <div className="p-4 border-t border-gray-200 space-y-1">
               <Link href="/settings" className="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-gray-200 active:scale-[0.98] transition-all text-sm text-gray-700">
-                <Settings className="w-4 h-4" /> {t('settings')}
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-bolt-icon lucide-bolt w-4 h-4"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><circle cx="12" cy="12" r="4"/></svg> {t('settings')}
               </Link>
               <Link href="/about" className="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-gray-200 active:scale-[0.98] transition-all text-sm text-gray-700">
-                <BookOpen className="w-4 h-4" /> Tentang
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-info-icon lucide-info w-4 h-4"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg> Tentang
               </Link>
               <Link href="/help" className="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-gray-200 active:scale-[0.98] transition-all text-sm text-gray-700">
-                <HelpCircle className="w-4 h-4" /> {t('help')}
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-badge-question-mark-icon lucide-badge-question-mark w-4 h-4"><path d="M3.85 8.62a4 4 0 0 1 4.78-4.77 4 4 0 0 1 6.74 0 4 4 0 0 1 4.78 4.78 4 4 0 0 1 0 6.74 4 4 0 0 1-4.77 4.78 4 4 0 0 1-6.75 0 4 4 0 0 1-4.78-4.77 4 4 0 0 1 0-6.76Z"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" x2="12.01" y1="17" y2="17"/></svg> {t('help')}
               </Link>
             </div>
           </aside>
@@ -1283,16 +1377,14 @@ export default function ZhiyouApp() {
         <header className="flex-shrink-0 flex items-center justify-between p-3 sm:p-4 bg-white/80 backdrop-blur-md z-10">
           <div className="flex items-center gap-1">
             <button onClick={() => setIsSidebarOpen(true)} className="p-2 hover:bg-gray-100 active:scale-90 rounded-full transition-all md:hidden">
-              <Menu className="w-6 h-6 text-gray-600" />
+              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-text-align-start-icon lucide-text-align-start w-6 h-6 text-gray-600"><path d="M21 5H3"/><path d="M15 12H3"/><path d="M17 19H3"/></svg>
             </button>
             <button 
               onClick={createNewChat} 
               className="p-2 hover:bg-gray-100 active:scale-90 rounded-full transition-all text-gray-600 hover:text-blue-600 group"
               title={t('newChat')}
             >
-              <div className="w-6 h-6 rounded-full border-[1.5px] border-dashed border-gray-400 group-hover:border-blue-500 flex items-center justify-center transition-colors">
-                <Plus className="w-4 h-4" />
-              </div>
+              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-circle-fading-plus-icon lucide-circle-fading-plus w-6 h-6 group-hover:text-blue-500 transition-colors"><path d="M12 2a10 10 0 0 1 7.38 16.75"/><path d="M12 8v8"/><path d="M16 12H8"/><path d="M2.5 8.875a10 10 0 0 0-.5 3"/><path d="M2.83 16a10 10 0 0 0 2.43 3.4"/><path d="M4.636 5.235a10 10 0 0 1 .891-.857"/><path d="M8.644 21.42a10 10 0 0 0 7.631-.38"/></svg>
             </button>
           </div>
           
@@ -1418,31 +1510,77 @@ export default function ZhiyouApp() {
                     </div>
                   )}
                   
-                  <div className={`max-w-[85%] ${msg.role === 'user' ? 'bg-[#f4f4f5] px-5 py-3 rounded-3xl rounded-tr-sm' : ''}`}>
+                  <div 
+                    className={`max-w-[85%] relative group ${msg.role === 'user' ? 'bg-[#f4f4f5] px-5 py-3 rounded-3xl rounded-tr-sm' : ''}`}
+                    onClick={() => msg.role === 'user' && setClickedMessageIndex(clickedMessageIndex === idx ? null : idx)}
+                  >
                     {msg.role === 'user' ? (
                       <div className="flex flex-col gap-2">
-                        {msg.attachments && msg.attachments.length > 0 && (
-                          <div className="flex flex-wrap gap-2">
-                            {msg.attachments.map((att, i) => (
-                              <div key={i} className="flex items-center gap-2 bg-white/60 border border-gray-200/60 rounded-xl p-2 shadow-sm">
-                                {att.previewUrl ? (
-                                  <div className="w-10 h-10 rounded-lg overflow-hidden bg-gray-100 flex-shrink-0">
-                                    <Image src={att.previewUrl} alt="preview" fill className="object-cover" referrerPolicy="no-referrer" />
-                                  </div>
-                                ) : (
-                                  <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0">
-                                    {att.mimeType.startsWith('video/') ? <Video className="w-5 h-5 text-blue-500" /> : <FileText className="w-5 h-5 text-blue-500" />}
-                                  </div>
-                                )}
-                                <div className="flex flex-col min-w-0 pr-2">
-                                  <span className="text-xs font-medium text-gray-700 truncate">{truncateName(att.name)}</span>
-                                  <span className="text-[10px] text-gray-500">{att.size}</span>
-                                </div>
-                              </div>
-                            ))}
+                        {editingMessageIndex === idx ? (
+                          <div className="flex flex-col gap-2 w-full min-w-[200px] sm:min-w-[300px]">
+                            <textarea
+                              value={editPromptValue}
+                              onChange={(e) => setEditPromptValue(e.target.value)}
+                              className="w-full bg-white border border-gray-300 rounded-xl p-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+                              rows={3}
+                              autoFocus
+                              onClick={(e) => e.stopPropagation()}
+                            />
+                            <div className="flex justify-end gap-2">
+                              <button 
+                                onClick={(e) => { e.stopPropagation(); setEditingMessageIndex(null); }}
+                                className="px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-200 rounded-lg transition-colors"
+                              >
+                                Batal
+                              </button>
+                              <button 
+                                onClick={(e) => { e.stopPropagation(); handleEditPrompt(idx); }}
+                                className="px-3 py-1.5 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors"
+                              >
+                                Kirim
+                              </button>
+                            </div>
                           </div>
+                        ) : (
+                          <>
+                            {msg.attachments && msg.attachments.length > 0 && (
+                              <div className="flex flex-wrap gap-2">
+                                {msg.attachments.map((att, i) => (
+                                  <div key={i} className="flex items-center gap-2 bg-white/60 border border-gray-200/60 rounded-xl p-2 shadow-sm">
+                                    {att.previewUrl ? (
+                                      <div className="w-10 h-10 rounded-lg overflow-hidden bg-gray-100 flex-shrink-0">
+                                        <Image src={att.previewUrl} alt="preview" fill className="object-cover" referrerPolicy="no-referrer" />
+                                      </div>
+                                    ) : (
+                                      <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0">
+                                        {att.mimeType.startsWith('video/') ? <Video className="w-5 h-5 text-blue-500" /> : <FileText className="w-5 h-5 text-blue-500" />}
+                                      </div>
+                                    )}
+                                    <div className="flex flex-col min-w-0 pr-2">
+                                      <span className="text-xs font-medium text-gray-700 truncate">{truncateName(att.name)}</span>
+                                      <span className="text-[10px] text-gray-500">{att.size}</span>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                            {msg.text && <p className="text-gray-800 whitespace-pre-wrap">{msg.text}</p>}
+                            <div className={`absolute -left-10 top-1/2 -translate-y-1/2 transition-opacity duration-200 ${clickedMessageIndex === idx ? 'opacity-100' : 'opacity-0 md:group-hover:opacity-100'}`}>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setEditingMessageIndex(idx);
+                                  setEditPromptValue(msg.text || '');
+                                  setClickedMessageIndex(null);
+                                }}
+                                className="p-1.5 bg-white border border-gray-200 text-gray-500 hover:text-blue-600 rounded-full shadow-sm hover:bg-gray-50 transition-all"
+                                title="Edit prompt"
+                              >
+                                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-pencil-line-icon lucide-pencil-line w-4 h-4"><path d="M13 21h8"/><path d="m15 5 4 4"/><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/></svg>
+                              </button>
+                            </div>
+                          </>
                         )}
-                        {msg.text && <p className="text-gray-800 whitespace-pre-wrap">{msg.text}</p>}
                       </div>
                     ) : (
                       <div className="prose prose-slate max-w-none prose-p:leading-relaxed prose-pre:bg-gray-50 prose-pre:text-gray-800 prose-pre:border prose-pre:border-gray-200 prose-a:text-blue-600">
@@ -1675,22 +1813,28 @@ export default function ZhiyouApp() {
               <div className={`relative bg-[#f4f4f5] rounded-3xl p-3 sm:p-4 z-10 flex flex-col shadow-sm transition-all duration-300 ${(input.trim().length > 0 || attachments.length > 0) ? 'ring-2 ring-blue-100 shadow-md shadow-blue-500/10' : ''}`}>
                 
                 {/* Attachment Preview Area */}
-                {attachments.length > 0 && (
+                {(attachments.length > 0 || isUploading) && (
                   <div className="flex flex-wrap gap-2 mb-3">
                     {attachments.map((att, idx) => (
-                      <div key={idx} className="relative flex items-center gap-2 bg-white border border-gray-200 rounded-xl p-2 pr-8 shadow-sm group">
+                      <div key={idx} className="relative flex items-center gap-2 bg-white border border-green-200 rounded-xl p-2 pr-8 shadow-sm group">
                         {att.previewUrl ? (
                           <div className="w-10 h-10 rounded-lg overflow-hidden bg-gray-100 flex-shrink-0 relative">
                             <Image src={att.previewUrl} alt="preview" fill className="object-cover" referrerPolicy="no-referrer" />
+                            <div className="absolute inset-0 bg-black/10 flex items-center justify-center">
+                              <CheckCircle2 className="w-4 h-4 text-white drop-shadow-md" />
+                            </div>
                           </div>
                         ) : (
-                          <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0">
-                            {att.mimeType.startsWith('video/') ? <Video className="w-5 h-5 text-blue-500" /> : <FileText className="w-5 h-5 text-blue-500" />}
+                          <div className="w-10 h-10 rounded-lg bg-green-50 flex items-center justify-center flex-shrink-0 relative">
+                            {att.mimeType.startsWith('video/') ? <Video className="w-5 h-5 text-green-500" /> : <FileText className="w-5 h-5 text-green-500" />}
+                            <div className="absolute -bottom-1 -right-1 bg-white rounded-full">
+                              <CheckCircle2 className="w-3.5 h-3.5 text-green-500" />
+                            </div>
                           </div>
                         )}
                         <div className="flex flex-col min-w-0">
                           <span className="text-xs font-medium text-gray-700 truncate">{truncateName(att.name)}</span>
-                          <span className="text-[10px] text-gray-500">{att.size}</span>
+                          <span className="text-[10px] text-green-600 font-medium">{t('done')} • {att.size}</span>
                         </div>
                         <button 
                           onClick={() => {
@@ -1706,6 +1850,26 @@ export default function ZhiyouApp() {
                         </button>
                       </div>
                     ))}
+                    
+                    {isUploading && (
+                      <div className="relative flex items-center gap-3 bg-white border border-blue-200 rounded-xl p-2 pr-4 shadow-sm min-w-[160px]">
+                        <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0">
+                          <Loader2 className="w-5 h-5 text-blue-500 animate-spin" />
+                        </div>
+                        <div className="flex flex-col min-w-0 flex-1">
+                          <div className="flex justify-between items-center">
+                            <span className="text-xs font-medium text-gray-700">{t('uploading')}</span>
+                            <span className="text-[10px] font-medium text-blue-600">{uploadProgress}%</span>
+                          </div>
+                          <div className="w-full bg-gray-200 rounded-full h-1.5 mt-1.5 overflow-hidden">
+                            <div 
+                              className="bg-blue-500 h-1.5 rounded-full transition-all duration-300 ease-out" 
+                              style={{ width: `${uploadProgress}%` }}
+                            ></div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -1788,7 +1952,7 @@ export default function ZhiyouApp() {
                       className={`p-2 rounded-full transition-all active:scale-90 ${isAttachmentMenuOpen ? 'bg-gray-200 text-gray-800' : 'hover:bg-gray-200/80 text-gray-500'}`} 
                       title={t('addFile')}
                     >
-                      <Plus className={`w-5 h-5 transition-transform duration-300 ${isAttachmentMenuOpen ? 'rotate-45' : ''}`} />
+                      <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`lucide lucide-paperclip-icon lucide-paperclip w-5 h-5 transition-transform duration-300 ${isAttachmentMenuOpen ? 'rotate-45' : ''}`}><path d="m16 6-8.414 8.586a2 2 0 0 0 2.829 2.829l8.414-8.586a4 4 0 1 0-5.657-5.657l-8.379 8.551a6 6 0 1 0 8.485 8.485l8.379-8.551"/></svg>
                     </button>
                     
                     <button 
