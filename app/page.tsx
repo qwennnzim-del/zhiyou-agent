@@ -950,8 +950,66 @@ export default function ZhiyouApp() {
         }
       };
 
+      const getWeather: FunctionDeclaration = {
+        name: "getWeather",
+        description: "Get the current weather for a specific location",
+        parameters: {
+          type: Type.OBJECT,
+          properties: {
+            location: {
+              type: Type.STRING,
+              description: "The city and country, e.g. 'Jakarta, Indonesia', 'Tokyo, Japan'"
+            }
+          },
+          required: ["location"]
+        }
+      };
+
+      const readWebsiteContent: FunctionDeclaration = {
+        name: "readWebsiteContent",
+        description: "Read and extract text content from a specific URL or website",
+        parameters: {
+          type: Type.OBJECT,
+          properties: {
+            url: {
+              type: Type.STRING,
+              description: "The full URL of the website to read, e.g. 'https://en.wikipedia.org/wiki/Artificial_intelligence'"
+            }
+          },
+          required: ["url"]
+        }
+      };
+
+      const saveUserPreference: FunctionDeclaration = {
+        name: "saveUserPreference",
+        description: "Save a user preference or memory to long-term storage",
+        parameters: {
+          type: Type.OBJECT,
+          properties: {
+            key: {
+              type: Type.STRING,
+              description: "The key or category of the preference, e.g. 'allergies', 'favorite_color', 'name'"
+            },
+            value: {
+              type: Type.STRING,
+              description: "The value to remember, e.g. 'peanuts', 'blue', 'Budi'"
+            }
+          },
+          required: ["key", "value"]
+        }
+      };
+
+      const getUserPreferences: FunctionDeclaration = {
+        name: "getUserPreferences",
+        description: "Retrieve all saved user preferences and memories",
+        parameters: {
+          type: Type.OBJECT,
+          properties: {}
+        }
+      };
+
       config.tools = [
-        { functionDeclarations: [getCurrentTime, calculateMath] }
+        { functionDeclarations: [getCurrentTime, calculateMath, getWeather, readWebsiteContent, saveUserPreference, getUserPreferences] }
       ];
 
       if (isSearchEnabled || featureMode === 'research' || featureMode === 'learning') {
@@ -1173,7 +1231,7 @@ export default function ZhiyouApp() {
             });
             
             // Execute functions
-            const functionResponses = functionCallsToHandle.map(call => {
+            const functionResponses = await Promise.all(functionCallsToHandle.map(async call => {
               let result: any;
               if (call.name === 'getCurrentTime') {
                 try {
@@ -1190,6 +1248,63 @@ export default function ZhiyouApp() {
                 } catch (e) {
                   result = { error: 'Invalid expression' };
                 }
+              } else if (call.name === 'getWeather') {
+                try {
+                  const geoRes = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(call.args.location)}&count=1`);
+                  const geoData = await geoRes.json();
+                  if (!geoData.results || geoData.results.length === 0) {
+                    result = { error: 'Location not found' };
+                  } else {
+                    const { latitude, longitude, name, country } = geoData.results[0];
+                    const weatherRes = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m`);
+                    const weatherData = await weatherRes.json();
+                    result = { location: `${name}, ${country}`, current_weather: weatherData.current };
+                  }
+                } catch (e: any) {
+                  result = { error: `Failed to get weather: ${e.message}` };
+                }
+              } else if (call.name === 'readWebsiteContent') {
+                try {
+                  const res = await fetch(`/api/fetch-url?url=${encodeURIComponent(call.args.url)}`);
+                  const data = await res.json();
+                  if (data.error) {
+                    result = { error: data.error };
+                  } else {
+                    result = { content: data.text };
+                  }
+                } catch (e: any) {
+                  result = { error: `Failed to read website: ${e.message}` };
+                }
+              } else if (call.name === 'saveUserPreference') {
+                if (!user) {
+                  result = { error: 'User is not logged in' };
+                } else {
+                  try {
+                    const userRef = doc(db, 'users', user.uid);
+                    await setDoc(userRef, { 
+                      preferences: { [call.args.key]: call.args.value } 
+                    }, { merge: true });
+                    result = { success: true, message: `Saved ${call.args.key} = ${call.args.value}` };
+                  } catch (e: any) {
+                    result = { error: `Failed to save preference: ${e.message}` };
+                  }
+                }
+              } else if (call.name === 'getUserPreferences') {
+                if (!user) {
+                  result = { error: 'User is not logged in' };
+                } else {
+                  try {
+                    const userRef = doc(db, 'users', user.uid);
+                    const docSnap = await getDoc(userRef);
+                    if (docSnap.exists() && docSnap.data().preferences) {
+                      result = { preferences: docSnap.data().preferences };
+                    } else {
+                      result = { preferences: {} };
+                    }
+                  } catch (e: any) {
+                    result = { error: `Failed to get preferences: ${e.message}` };
+                  }
+                }
               } else {
                 result = { error: 'Unknown function' };
               }
@@ -1200,7 +1315,7 @@ export default function ZhiyouApp() {
                   response: result
                 }
               };
-            });
+            }));
             
             // Append function responses to history
             currentContents.push({
