@@ -738,10 +738,10 @@ export default function ZhiyouApp() {
     handleSend(editPromptValue, msgToEdit.attachments || [], newMessages);
   };
 
-  const handleSend = async (overrideText?: string, overrideAttachments?: Attachment[], overrideMessages?: Message[]) => {
-    const textToSend = overrideText !== undefined ? overrideText : input;
-    const attachmentsToSend = overrideAttachments !== undefined ? overrideAttachments : attachments;
-    const currentMessages = overrideMessages !== undefined ? overrideMessages : messages;
+  const handleSend = async (overrideText?: string | any, overrideAttachments?: Attachment[], overrideMessages?: Message[]) => {
+    const textToSend = typeof overrideText === 'string' ? overrideText : (input || '');
+    const attachmentsToSend = Array.isArray(overrideAttachments) ? overrideAttachments : attachments;
+    const currentMessages = Array.isArray(overrideMessages) ? overrideMessages : messages;
 
     if ((!textToSend.trim() && attachmentsToSend.length === 0) || isLoading) return;
     
