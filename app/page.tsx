@@ -79,7 +79,7 @@ export default function ZhiyouApp() {
   const [isLoading, setIsLoading] = useState(false);
   const [isThinking, setIsThinking] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [selectedModel, setSelectedModel] = useState('gemini-2.5-flash');
+  const [selectedModel, setSelectedModel] = useState('gemini-3-flash-preview');
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
@@ -695,7 +695,7 @@ export default function ZhiyouApp() {
     }
 
     chatRef.current = ai.chats.create({
-      model: 'gemini-2.5-flash', // Always use 2.5 flash under the hood
+      model: 'gemini-3-flash-preview', // Always use 3 flash under the hood
       config: {
         systemInstruction: systemInstruction,
       }
@@ -789,7 +789,7 @@ export default function ZhiyouApp() {
           
           if (imageParts.length > 0) {
             const result = await ai.models.generateContent({
-              model: 'gemini-2.5-flash',
+              model: 'gemini-3-flash-preview',
               contents: [{
                 role: 'user',
                 parts: [
@@ -1057,41 +1057,20 @@ export default function ZhiyouApp() {
         if (!user) return;
         
         try {
-          // Add a timeout promise to prevent hanging indefinitely
-          const timeoutPromise = new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('Waktu pembuatan gambar habis (timeout). Silakan coba lagi dengan prompt yang lebih sederhana.')), 45000)
-          );
+          // Menggunakan Pollinations.ai (Model Flux) yang gratis tanpa API Key
+          const seed1 = Math.floor(Math.random() * 1000000);
+          const seed2 = Math.floor(Math.random() * 1000000);
+          const seed3 = Math.floor(Math.random() * 1000000);
+          const seed4 = Math.floor(Math.random() * 1000000);
+          
+          const [width, height] = aspectRatio === '16:9' ? [1280, 720] : aspectRatio === '9:16' ? [720, 1280] : [1024, 1024];
 
-          const generatePromise = ai.models.generateContent({
-            model: 'gemini-2.5-flash-image',
-            contents: {
-              parts: [
-                {
-                  text: finalPrompt,
-                },
-              ],
-            },
-            config: {
-              imageConfig: {
-                aspectRatio: aspectRatio,
-              },
-            },
-          });
-
-          const response = await Promise.race([generatePromise, timeoutPromise]) as any;
-
-          const imageResults: string[] = [];
-          for (const part of response.candidates?.[0]?.content?.parts || []) {
-            if (part.inlineData) {
-              const base64EncodeString = part.inlineData.data;
-              const imageUrl = `data:${part.inlineData.mimeType || 'image/png'};base64,${base64EncodeString}`;
-              imageResults.push(imageUrl);
-            }
-          }
-
-          if (imageResults.length === 0) {
-            throw new Error('Gagal membuat gambar. Prompt mungkin melanggar kebijakan keamanan atau model sedang sibuk.');
-          }
+          const imageResults = [
+            `https://image.pollinations.ai/prompt/${encodeURIComponent(finalPrompt)}?width=${width}&height=${height}&nologo=true&seed=${seed1}&model=flux`,
+            `https://image.pollinations.ai/prompt/${encodeURIComponent(finalPrompt)}?width=${width}&height=${height}&nologo=true&seed=${seed2}&model=flux`,
+            `https://image.pollinations.ai/prompt/${encodeURIComponent(finalPrompt)}?width=${width}&height=${height}&nologo=true&seed=${seed3}&model=flux`,
+            `https://image.pollinations.ai/prompt/${encodeURIComponent(finalPrompt)}?width=${width}&height=${height}&nologo=true&seed=${seed4}&model=flux`
+          ];
           
           setIsThinking(false);
           setMessages(prev => {
@@ -1156,7 +1135,7 @@ export default function ZhiyouApp() {
         
         while (!isDone) {
           const responseStream = await ai.models.generateContentStream({
-            model: 'gemini-2.5-flash', // Always use 2.5 flash
+            model: 'gemini-3-flash-preview', // Always use 3 flash
             contents: currentContents,
             config: config
           });
@@ -1511,7 +1490,7 @@ export default function ZhiyouApp() {
               <div className="w-5 h-5 rounded-full bg-white border border-gray-200 flex items-center justify-center shadow-sm">
                 <ZhiyouLogo className="w-3.5 h-3.5" />
               </div>
-              {selectedModel === 'gemini-2.5-flash' ? t('modelZhiyou25') : selectedModel === 'zhiyou-3' ? t('modelZhiyou3') : selectedModel === 'zhiyou-art-2.0' ? 'Zhiyou Art 2.0' : 'Zhiyou Art'}
+              {selectedModel === 'gemini-3-flash-preview' ? t('modelZhiyou25') : selectedModel === 'zhiyou-3' ? t('modelZhiyou3') : selectedModel === 'zhiyou-art-2.0' ? 'Zhiyou Art 2.0' : 'Zhiyou Art'}
               <ChevronDown className={`w-4 h-4 text-gray-500 transition-transform ${isModelMenuOpen ? 'rotate-180' : ''}`} />
             </button>
           </div>
@@ -2378,8 +2357,8 @@ export default function ZhiyouApp() {
               
               <div className="space-y-3">
                 <button 
-                  onClick={() => { handleModelOrFeatureChange('gemini-2.5-flash', (featureMode === 'imageSearch' || featureMode === 'image') ? 'chat' : featureMode); setIsModelMenuOpen(false); }}
-                  className={`w-full flex items-center justify-between p-4 rounded-2xl border transition-all active:scale-[0.98] ${selectedModel === 'gemini-2.5-flash' ? 'border-blue-500 bg-blue-50/30' : 'border-gray-200 hover:border-blue-300 hover:bg-gray-50'}`}
+                  onClick={() => { handleModelOrFeatureChange('gemini-3-flash-preview', (featureMode === 'imageSearch' || featureMode === 'image') ? 'chat' : featureMode); setIsModelMenuOpen(false); }}
+                  className={`w-full flex items-center justify-between p-4 rounded-2xl border transition-all active:scale-[0.98] ${selectedModel === 'gemini-3-flash-preview' ? 'border-blue-500 bg-blue-50/30' : 'border-gray-200 hover:border-blue-300 hover:bg-gray-50'}`}
                 >
                   <div className="flex items-center gap-4">
                     <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center text-blue-600">
@@ -2390,7 +2369,7 @@ export default function ZhiyouApp() {
                       <p className="text-sm text-gray-500">{t('modelZhiyou25Desc')}</p>
                     </div>
                   </div>
-                  {selectedModel === 'gemini-2.5-flash' && <Check className="w-5 h-5 text-blue-600" />}
+                  {selectedModel === 'gemini-3-flash-preview' && <Check className="w-5 h-5 text-blue-600" />}
                 </button>
 
                 <button 
