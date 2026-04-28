@@ -521,6 +521,8 @@ export default function ZhiyouApp() {
       return;
     }
     
+    let initialLoadDoneLocal = hasLoadedInitialChat.current;
+    
     const chatsRef = collection(db, 'users', user.uid, 'chats');
     const q = query(chatsRef, orderBy('updatedAt', 'desc'));
     
@@ -531,15 +533,26 @@ export default function ZhiyouApp() {
       })) as Chat[];
       setChatHistory(history);
       
-      if (!hasLoadedInitialChat.current && !chatId && history.length > 0 && messages.length === 0) {
-        setChatId(history[0].id);
-        setMessages(history[0].messages || []);
+      if (!initialLoadDoneLocal && history.length > 0) {
+        setChatId(prevId => {
+          if (!prevId) {
+            setMessages(prevMsg => {
+              if (prevMsg.length === 0) {
+                return history[0].messages || [];
+              }
+              return prevMsg;
+            });
+            return history[0].id;
+          }
+          return prevId;
+        });
         hasLoadedInitialChat.current = true;
+        initialLoadDoneLocal = true;
       }
     });
     
     return () => unsubscribe();
-  }, [user, chatId, messages.length]);
+  }, [user]);
 
   const createNewChat = () => {
     setMessages([]);
@@ -770,6 +783,13 @@ export default function ZhiyouApp() {
     setIsLoading(true);
     setIsThinking(true);
     setLoadingTextIndex(0);
+    
+    // Initialize activeChatId immediately to prevent collision
+    let activeChatId = chatId;
+    if (!activeChatId && user) {
+      activeChatId = doc(collection(db, 'users', user.uid, 'chats')).id;
+      setChatId(activeChatId);
+    }
     
     // Add empty model message immediately so loader shows up
     setMessages([...newMessagesList, { role: 'model', text: '', sources: [], model: selectedModel }]);
@@ -1309,14 +1329,10 @@ export default function ZhiyouApp() {
         }
       }
 
-      if (user) {
+      if (user && activeChatId) {
         try {
-          const chatRef = chatId 
-            ? doc(db, 'users', user.uid, 'chats', chatId)
-            : doc(collection(db, 'users', user.uid, 'chats'));
+          const chatRef = doc(db, 'users', user.uid, 'chats', activeChatId);
             
-          if (!chatId) setChatId(chatRef.id);
-          
           setMessages(prev => {
             const msgsToSave = prev.map(m => ({
               role: m.role,
