@@ -510,6 +510,11 @@ export default function ZhiyouApp() {
         await setDoc(userRef, { proUses: 5, createdAt: serverTimestamp() });
         setProUses(5);
       }
+    }, (error) => {
+      console.error("Firebase Snapshot Error (user):", error);
+      if (error instanceof Error && error.message.includes("Missing or insufficient permissions")) {
+        console.warn("Permission denied while listening to user document.");
+      }
     });
 
     return () => unsubscribe();
@@ -538,7 +543,7 @@ export default function ZhiyouApp() {
           if (!prevId) {
             setMessages(prevMsg => {
               if (prevMsg.length === 0) {
-                return history[0].messages || [];
+                return processMessages(history[0].messages || []);
               }
               return prevMsg;
             });
@@ -549,12 +554,15 @@ export default function ZhiyouApp() {
         hasLoadedInitialChat.current = true;
         initialLoadDoneLocal = true;
       }
+    }, (error) => {
+      console.error("Firebase Snapshot Error (chats):", error);
     });
     
     return () => unsubscribe();
   }, [user]);
 
   const createNewChat = () => {
+    if (isLoading) return;
     setMessages([]);
     setChatId(null);
     setIsSidebarOpen(false);
@@ -563,15 +571,47 @@ export default function ZhiyouApp() {
     setIsImageAnalysisMode(false);
   };
 
+  const processMessages = (rawMessages: any[]) => {
+    return rawMessages.map((m: any) => {
+      let text = m.text || '';
+      let reasoning = m.reasoning || '';
+      
+      if (!reasoning && text.includes('<think>')) {
+        const thinkMatch = text.match(/<think>([\s\S]*?)<\/think>/i);
+        if (thinkMatch) {
+          reasoning = thinkMatch[1].trim();
+          text = text.replace(/<think>[\s\S]*?<\/think>/i, '').trim();
+        } else {
+          const openThinkMatch = text.match(/<think>([\s\S]*)/i);
+          if (openThinkMatch) {
+            reasoning = openThinkMatch[1].trim();
+            text = text.replace(/<think>[\s\S]*/i, '').trim();
+          }
+        }
+      }
+      
+      // Fallback just in case
+      text = text.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+      text = text.replace(/<think>[\s\S]*/gi, '').trim();
+
+      return {
+        ...m,
+        text,
+        reasoning: reasoning || null,
+        isReasoningExpanded: false
+      };
+    });
+  };
+
   const loadChat = async (id: string) => {
-    if (!user) return;
+    if (!user || isLoading) return;
     setChatId(id);
     setIsSidebarOpen(false);
     
     try {
       const chatDoc = await getDoc(doc(db, 'users', user.uid, 'chats', id));
       if (chatDoc.exists()) {
-        setMessages(chatDoc.data().messages || []);
+        setMessages(processMessages(chatDoc.data().messages || []));
       }
     } catch (error) {
       console.error("Error loading chat:", error);
@@ -793,6 +833,30 @@ export default function ZhiyouApp() {
     
     // Add empty model message immediately so loader shows up
     setMessages([...newMessagesList, { role: 'model', text: '', sources: [], model: selectedModel }]);
+    
+    // Save the user message immediately so it's not lost
+    if (user && activeChatId) {
+      const chatRef = doc(db, 'users', user.uid, 'chats', activeChatId);
+      const msgsToSave = newMessagesList.map(m => ({
+        role: m.role,
+        text: m.text,
+        reasoning: m.reasoning || null,
+        model: m.model || null,
+        attachments: m.attachments?.map(a => ({
+          base64: a.base64,
+          mimeType: a.mimeType,
+          name: a.name,
+          size: a.size
+        })) || [],
+        sources: m.sources || [],
+        imageResults: m.imageResults || []
+      }));
+      setDoc(chatRef, {
+        messages: msgsToSave,
+        updatedAt: serverTimestamp(),
+        title: msgsToSave[0]?.text?.substring(0, 30) || 'Chat Baru'
+      }, { merge: true }).catch(err => console.error("Firestore save error:", err));
+    }
     
     try {
       // If it's an image feature and no text but has image, generate prompt from image
@@ -1184,17 +1248,18 @@ export default function ZhiyouApp() {
             let isReasoningExpanded = true;
             
             if (selectedModel === 'zhiyou-3') {
-              if (fullText.includes('<think>') && fullText.includes('</think>')) {
-                const parts = fullText.split('</think>');
-                if (parts.length > 1) {
-                  reasoningText = parts[0].replace('<think>', '').trim();
-                  displayText = parts[1].trim();
-                  isReasoningExpanded = false; // Auto-collapse when thinking is done
+              const fullThinkMatch = fullText.match(/<think>([\s\S]*?)<\/think>/i);
+              if (fullThinkMatch) {
+                reasoningText = fullThinkMatch[1].trim();
+                displayText = fullText.replace(/<think>[\s\S]*?<\/think>/i, '').trim();
+                isReasoningExpanded = false; // Auto-collapse when thinking is done
+              } else {
+                const openThinkMatch = fullText.match(/<think>([\s\S]*)/i);
+                if (openThinkMatch) {
+                  reasoningText = openThinkMatch[1].trim();
+                  displayText = fullText.replace(/<think>[\s\S]*/i, '').trim();
+                  isReasoningExpanded = true; // Keep expanded while thinking
                 }
-              } else if (fullText.includes('<think>')) {
-                 reasoningText = fullText.replace('<think>', '').trim();
-                 displayText = '';
-                 isReasoningExpanded = true; // Keep expanded while thinking
               }
             }
             
@@ -1338,6 +1403,7 @@ export default function ZhiyouApp() {
               role: m.role,
               text: m.text,
               reasoning: m.reasoning || null,
+              model: m.model || null,
               attachments: m.attachments?.map(a => ({
                 base64: a.base64,
                 mimeType: a.mimeType,
@@ -1839,7 +1905,7 @@ export default function ZhiyouApp() {
                                       exit={{ height: 0, opacity: 0 }}
                                       className="overflow-hidden mt-2"
                                     >
-                                      <div className="p-4 bg-gray-50/80 rounded-xl border-l-4 border-l-gray-300 border-y border-r border-y-gray-100 border-r-gray-100 text-sm text-gray-500 italic leading-relaxed whitespace-pre-wrap">
+                                      <div className="p-4 bg-gray-50/80 rounded-xl border-l-4 border-l-gray-300 border-y border-r border-y-gray-100 border-r-gray-100 text-sm text-gray-600 italic leading-relaxed whitespace-pre-wrap">
                                         {msg.reasoning}
                                       </div>
                                     </motion.div>
