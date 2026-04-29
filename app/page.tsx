@@ -2054,7 +2054,7 @@ export default function ZhiyouApp() {
                   </div>
                   
                   <button 
-                    onClick={handleSend}
+                    onClick={() => handleSend()}
                     disabled={(!input.trim() && attachments.length === 0) || isLoading}
                     className="p-2 bg-gray-200 hover:bg-gray-300 active:scale-90 disabled:opacity-50 disabled:hover:bg-gray-200 disabled:active:scale-100 rounded-full transition-all text-gray-700"
                   >
