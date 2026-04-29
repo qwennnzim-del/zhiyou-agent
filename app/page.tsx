@@ -105,6 +105,12 @@ export default function ZhiyouApp() {
   const [currentPrompt, setCurrentPrompt] = useState('');
   const [isImageAnalysisMode, setIsImageAnalysisMode] = useState(false);
   const hasLoadedInitialChat = useRef(false);
+  const activeChatIdRef = useRef<string | null>(null);
+
+  // Sync ref with state
+  useEffect(() => {
+    activeChatIdRef.current = chatId;
+  }, [chatId]);
 
   const handleModelOrFeatureChange = (model: string, feature: 'chat' | 'image' | 'research' | 'learning' | 'imageSearch') => {
     if (selectedModel !== model || featureMode !== feature) {
@@ -515,6 +521,11 @@ export default function ZhiyouApp() {
     return () => unsubscribe();
   }, [user]);
 
+  const messagesLengthRef = useRef(messages.length);
+  useEffect(() => {
+    messagesLengthRef.current = messages.length;
+  }, [messages.length]);
+
   useEffect(() => {
     if (!user) {
       hasLoadedInitialChat.current = false;
@@ -531,7 +542,7 @@ export default function ZhiyouApp() {
       })) as Chat[];
       setChatHistory(history);
       
-      if (!hasLoadedInitialChat.current && !chatId && history.length > 0 && messages.length === 0) {
+      if (!hasLoadedInitialChat.current && !activeChatIdRef.current && history.length > 0 && messagesLengthRef.current === 0) {
         setChatId(history[0].id);
         setMessages(history[0].messages || []);
         hasLoadedInitialChat.current = true;
@@ -539,7 +550,7 @@ export default function ZhiyouApp() {
     });
     
     return () => unsubscribe();
-  }, [user, chatId, messages.length]);
+  }, [user]);
 
   const createNewChat = () => {
     setMessages([]);
@@ -576,6 +587,48 @@ export default function ZhiyouApp() {
       setChatToDelete(null);
     } catch (error) {
       console.error("Error deleting chat:", error);
+    }
+  };
+
+  const saveCurrentChatToFirestore = async (messagesToSave: Message[], currentChatId: string | null): Promise<string | null> => {
+    if (!user || messagesToSave.length === 0) return currentChatId;
+    
+    let resolvedChatId = currentChatId;
+    try {
+      const chatRef = resolvedChatId 
+        ? doc(db, 'users', user.uid, 'chats', resolvedChatId)
+        : doc(collection(db, 'users', user.uid, 'chats'));
+        
+      if (!resolvedChatId) {
+        resolvedChatId = chatRef.id;
+        setChatId(resolvedChatId);
+        activeChatIdRef.current = resolvedChatId;
+      }
+      
+      const firestoreMsgs = messagesToSave.map(m => ({
+        role: m.role,
+        text: m.text,
+        reasoning: m.reasoning || null,
+        attachments: m.attachments?.map(a => ({
+          base64: a.base64,
+          mimeType: a.mimeType,
+          name: a.name,
+          size: a.size
+        })) || [],
+        sources: m.sources || [],
+        imageResults: m.imageResults || []
+      }));
+      
+      await setDoc(chatRef, {
+        messages: firestoreMsgs,
+        updatedAt: serverTimestamp(),
+        title: firestoreMsgs[0]?.text?.substring(0, 30) || 'Chat Baru'
+      }, { merge: true });
+      
+      return resolvedChatId;
+    } catch (dbError) {
+      console.error("Error saving to Firestore:", dbError);
+      return resolvedChatId;
     }
   };
 
@@ -772,7 +825,14 @@ export default function ZhiyouApp() {
     setLoadingTextIndex(0);
     
     // Add empty model message immediately so loader shows up
-    setMessages([...newMessagesList, { role: 'model', text: '', sources: [], model: selectedModel }]);
+    const initialStreamMessages = [...newMessagesList, { role: 'model' as const, text: '', sources: [], model: selectedModel }];
+    setMessages(initialStreamMessages);
+    
+    let currentProcessChatId = activeChatIdRef.current;
+    if (user) {
+      // Save initial user message and get/create chatId immediately
+      currentProcessChatId = await saveCurrentChatToFirestore(newMessagesList, currentProcessChatId);
+    }
     
     try {
       // If it's an image feature and no text but has image, generate prompt from image
@@ -980,8 +1040,10 @@ export default function ZhiyouApp() {
         if (!isDeveloper && proUses !== null && proUses <= 0) {
           setIsThinking(false);
           setMessages(prev => {
+            if (activeChatIdRef.current !== currentProcessChatId) return prev;
             const newMessages = [...prev];
             newMessages[newMessages.length - 1].text = "Maaf, batas pemakaian fitur Pro Anda (5 kali) telah habis. Fitur ini mencakup model Zhiyou 3, pembuatan gambar, dan pencarian gambar.";
+            saveCurrentChatToFirestore(newMessages, currentProcessChatId);
             return newMessages;
           });
           setIsLoading(false);
@@ -1037,6 +1099,7 @@ export default function ZhiyouApp() {
           
           setIsThinking(false);
           setMessages(prev => {
+            if (activeChatIdRef.current !== currentProcessChatId) return prev;
             const newMessages = [...prev];
             newMessages[newMessages.length - 1].text = t('imageGenSuccess');
             newMessages[newMessages.length - 1].imageResults = imageResults;
@@ -1047,6 +1110,7 @@ export default function ZhiyouApp() {
           console.error("Image generation error:", error);
           setIsThinking(false);
           setMessages(prev => {
+            if (activeChatIdRef.current !== currentProcessChatId) return prev;
             const newMessages = [...prev];
             newMessages[newMessages.length - 1].text = `Maaf, terjadi kesalahan saat membuat gambar: ${error.message || 'Kesalahan tidak diketahui'}. Silakan coba lagi.`;
             return newMessages;
@@ -1075,6 +1139,7 @@ export default function ZhiyouApp() {
           }
 
           setMessages(prev => {
+            if (activeChatIdRef.current !== currentProcessChatId) return prev;
             const newMessages = [...prev];
             newMessages[newMessages.length - 1].text = data.images && data.images.length > 0 
               ? t('imageSearchSuccess')
@@ -1087,6 +1152,7 @@ export default function ZhiyouApp() {
           console.error("Image search error:", error);
           setIsThinking(false);
           setMessages(prev => {
+            if (activeChatIdRef.current !== currentProcessChatId) return prev;
             const newMessages = [...prev];
             newMessages[newMessages.length - 1].text = `Maaf, terjadi kesalahan saat mencari gambar: ${error.message || 'Kesalahan tidak diketahui'}. Silakan coba lagi.`;
             return newMessages;
@@ -1153,7 +1219,14 @@ export default function ZhiyouApp() {
               });
             }
 
+            if (activeChatIdRef.current !== currentProcessChatId) {
+              // User navigated to another chat, abort stream processing
+              isDone = true;
+              break;
+            }
+
             setMessages(prev => {
+              if (activeChatIdRef.current !== currentProcessChatId) return prev;
               const newMessages = [...prev];
               newMessages[newMessages.length - 1].text = displayText;
               if (selectedModel === 'zhiyou-3' && reasoningText) {
@@ -1215,35 +1288,12 @@ export default function ZhiyouApp() {
         }
       }
 
-      if (user) {
+      if (user && activeChatIdRef.current === currentProcessChatId) {
         try {
-          const chatRef = chatId 
-            ? doc(db, 'users', user.uid, 'chats', chatId)
-            : doc(collection(db, 'users', user.uid, 'chats'));
-            
-          if (!chatId) setChatId(chatRef.id);
-          
+          // Wrap in a callback to get newest messages, then save
           setMessages(prev => {
-            const msgsToSave = prev.map(m => ({
-              role: m.role,
-              text: m.text,
-              reasoning: m.reasoning || null,
-              attachments: m.attachments?.map(a => ({
-                base64: a.base64,
-                mimeType: a.mimeType,
-                name: a.name,
-                size: a.size
-              })) || [],
-              sources: m.sources || [],
-              imageResults: m.imageResults || []
-            }));
-            
-            setDoc(chatRef, {
-              messages: msgsToSave,
-              updatedAt: serverTimestamp(),
-              title: msgsToSave[0]?.text?.substring(0, 30) || 'Chat Baru'
-            }, { merge: true }).catch(err => console.error("Firestore save error:", err));
-            
+            // Save final messages to firestore using helper without awaiting since we are in setState (or we can just fire and forget)
+            saveCurrentChatToFirestore(prev, currentProcessChatId);
             return prev;
           });
         } catch (dbError) {
@@ -1254,8 +1304,10 @@ export default function ZhiyouApp() {
       console.error("Error sending message:", error);
       setIsThinking(false);
       setMessages(prev => {
+        if (activeChatIdRef.current !== currentProcessChatId) return prev;
         const newMessages = [...prev];
         newMessages[newMessages.length - 1].text = "Maaf, terjadi kesalahan: " + (error?.message || error?.toString() || "Unknown error");
+        saveCurrentChatToFirestore(newMessages, currentProcessChatId);
         return newMessages;
       });
     } finally {
