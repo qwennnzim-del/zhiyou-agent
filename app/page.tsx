@@ -79,7 +79,7 @@ export default function ZhiyouApp() {
   const [isLoading, setIsLoading] = useState(false);
   const [isThinking, setIsThinking] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [selectedModel, setSelectedModel] = useState('gemini-3-flash-preview');
+  const [selectedModel, setSelectedModel] = useState('gemini-2.5-flash');
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
@@ -510,11 +510,6 @@ export default function ZhiyouApp() {
         await setDoc(userRef, { proUses: 5, createdAt: serverTimestamp() });
         setProUses(5);
       }
-    }, (error) => {
-      console.error("Firebase Snapshot Error (user):", error);
-      if (error instanceof Error && error.message.includes("Missing or insufficient permissions")) {
-        console.warn("Permission denied while listening to user document.");
-      }
     });
 
     return () => unsubscribe();
@@ -526,8 +521,6 @@ export default function ZhiyouApp() {
       return;
     }
     
-    let initialLoadDoneLocal = hasLoadedInitialChat.current;
-    
     const chatsRef = collection(db, 'users', user.uid, 'chats');
     const q = query(chatsRef, orderBy('updatedAt', 'desc'));
     
@@ -538,31 +531,17 @@ export default function ZhiyouApp() {
       })) as Chat[];
       setChatHistory(history);
       
-      if (!initialLoadDoneLocal && history.length > 0) {
-        setChatId(prevId => {
-          if (!prevId) {
-            setMessages(prevMsg => {
-              if (prevMsg.length === 0) {
-                return processMessages(history[0].messages || []);
-              }
-              return prevMsg;
-            });
-            return history[0].id;
-          }
-          return prevId;
-        });
+      if (!hasLoadedInitialChat.current && !chatId && history.length > 0 && messages.length === 0) {
+        setChatId(history[0].id);
+        setMessages(history[0].messages || []);
         hasLoadedInitialChat.current = true;
-        initialLoadDoneLocal = true;
       }
-    }, (error) => {
-      console.error("Firebase Snapshot Error (chats):", error);
     });
     
     return () => unsubscribe();
-  }, [user]);
+  }, [user, chatId, messages.length]);
 
   const createNewChat = () => {
-    if (isLoading) return;
     setMessages([]);
     setChatId(null);
     setIsSidebarOpen(false);
@@ -571,47 +550,15 @@ export default function ZhiyouApp() {
     setIsImageAnalysisMode(false);
   };
 
-  const processMessages = (rawMessages: any[]) => {
-    return rawMessages.map((m: any) => {
-      let text = m.text || '';
-      let reasoning = m.reasoning || '';
-      
-      if (!reasoning && text.includes('<think>')) {
-        const thinkMatch = text.match(/<think>([\s\S]*?)<\/think>/i);
-        if (thinkMatch) {
-          reasoning = thinkMatch[1].trim();
-          text = text.replace(/<think>[\s\S]*?<\/think>/i, '').trim();
-        } else {
-          const openThinkMatch = text.match(/<think>([\s\S]*)/i);
-          if (openThinkMatch) {
-            reasoning = openThinkMatch[1].trim();
-            text = text.replace(/<think>[\s\S]*/i, '').trim();
-          }
-        }
-      }
-      
-      // Fallback just in case
-      text = text.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
-      text = text.replace(/<think>[\s\S]*/gi, '').trim();
-
-      return {
-        ...m,
-        text,
-        reasoning: reasoning || null,
-        isReasoningExpanded: false
-      };
-    });
-  };
-
   const loadChat = async (id: string) => {
-    if (!user || isLoading) return;
+    if (!user) return;
     setChatId(id);
     setIsSidebarOpen(false);
     
     try {
       const chatDoc = await getDoc(doc(db, 'users', user.uid, 'chats', id));
       if (chatDoc.exists()) {
-        setMessages(processMessages(chatDoc.data().messages || []));
+        setMessages(chatDoc.data().messages || []);
       }
     } catch (error) {
       console.error("Error loading chat:", error);
@@ -748,7 +695,7 @@ export default function ZhiyouApp() {
     }
 
     chatRef.current = ai.chats.create({
-      model: 'gemini-3-flash-preview', // Always use 3 flash under the hood
+      model: 'gemini-2.5-flash', // Always use 2.5 flash under the hood
       config: {
         systemInstruction: systemInstruction,
       }
@@ -791,10 +738,10 @@ export default function ZhiyouApp() {
     handleSend(editPromptValue, msgToEdit.attachments || [], newMessages);
   };
 
-  const handleSend = async (overrideText?: string | any, overrideAttachments?: Attachment[], overrideMessages?: Message[]) => {
-    const textToSend = typeof overrideText === 'string' ? overrideText : (input || '');
-    const attachmentsToSend = Array.isArray(overrideAttachments) ? overrideAttachments : attachments;
-    const currentMessages = Array.isArray(overrideMessages) ? overrideMessages : messages;
+  const handleSend = async (overrideText?: string, overrideAttachments?: Attachment[], overrideMessages?: Message[]) => {
+    const textToSend = overrideText !== undefined ? overrideText : input;
+    const attachmentsToSend = overrideAttachments !== undefined ? overrideAttachments : attachments;
+    const currentMessages = overrideMessages !== undefined ? overrideMessages : messages;
 
     if ((!textToSend.trim() && attachmentsToSend.length === 0) || isLoading) return;
     
@@ -824,39 +771,8 @@ export default function ZhiyouApp() {
     setIsThinking(true);
     setLoadingTextIndex(0);
     
-    // Initialize activeChatId immediately to prevent collision
-    let activeChatId = chatId;
-    if (!activeChatId && user) {
-      activeChatId = doc(collection(db, 'users', user.uid, 'chats')).id;
-      setChatId(activeChatId);
-    }
-    
     // Add empty model message immediately so loader shows up
     setMessages([...newMessagesList, { role: 'model', text: '', sources: [], model: selectedModel }]);
-    
-    // Save the user message immediately so it's not lost
-    if (user && activeChatId) {
-      const chatRef = doc(db, 'users', user.uid, 'chats', activeChatId);
-      const msgsToSave = newMessagesList.map(m => ({
-        role: m.role,
-        text: m.text,
-        reasoning: m.reasoning || null,
-        model: m.model || null,
-        attachments: m.attachments?.map(a => ({
-          base64: a.base64,
-          mimeType: a.mimeType,
-          name: a.name,
-          size: a.size
-        })) || [],
-        sources: m.sources || [],
-        imageResults: m.imageResults || []
-      }));
-      setDoc(chatRef, {
-        messages: msgsToSave,
-        updatedAt: serverTimestamp(),
-        title: msgsToSave[0]?.text?.substring(0, 30) || 'Chat Baru'
-      }, { merge: true }).catch(err => console.error("Firestore save error:", err));
-    }
     
     try {
       // If it's an image feature and no text but has image, generate prompt from image
@@ -873,7 +789,7 @@ export default function ZhiyouApp() {
           
           if (imageParts.length > 0) {
             const result = await ai.models.generateContent({
-              model: 'gemini-3-flash-preview',
+              model: 'gemini-2.5-flash',
               contents: [{
                 role: 'user',
                 parts: [
@@ -1034,66 +950,8 @@ export default function ZhiyouApp() {
         }
       };
 
-      const getWeather: FunctionDeclaration = {
-        name: "getWeather",
-        description: "Get the current weather for a specific location",
-        parameters: {
-          type: Type.OBJECT,
-          properties: {
-            location: {
-              type: Type.STRING,
-              description: "The city and country, e.g. 'Jakarta, Indonesia', 'Tokyo, Japan'"
-            }
-          },
-          required: ["location"]
-        }
-      };
-
-      const readWebsiteContent: FunctionDeclaration = {
-        name: "readWebsiteContent",
-        description: "Read and extract text content from a specific URL or website",
-        parameters: {
-          type: Type.OBJECT,
-          properties: {
-            url: {
-              type: Type.STRING,
-              description: "The full URL of the website to read, e.g. 'https://en.wikipedia.org/wiki/Artificial_intelligence'"
-            }
-          },
-          required: ["url"]
-        }
-      };
-
-      const saveUserPreference: FunctionDeclaration = {
-        name: "saveUserPreference",
-        description: "Save a user preference or memory to long-term storage",
-        parameters: {
-          type: Type.OBJECT,
-          properties: {
-            key: {
-              type: Type.STRING,
-              description: "The key or category of the preference, e.g. 'allergies', 'favorite_color', 'name'"
-            },
-            value: {
-              type: Type.STRING,
-              description: "The value to remember, e.g. 'peanuts', 'blue', 'Budi'"
-            }
-          },
-          required: ["key", "value"]
-        }
-      };
-
-      const getUserPreferences: FunctionDeclaration = {
-        name: "getUserPreferences",
-        description: "Retrieve all saved user preferences and memories",
-        parameters: {
-          type: Type.OBJECT,
-          properties: {}
-        }
-      };
-
       config.tools = [
-        { functionDeclarations: [getCurrentTime, calculateMath, getWeather, readWebsiteContent, saveUserPreference, getUserPreferences] }
+        { functionDeclarations: [getCurrentTime, calculateMath] }
       ];
 
       if (isSearchEnabled || featureMode === 'research' || featureMode === 'learning') {
@@ -1141,20 +999,41 @@ export default function ZhiyouApp() {
         if (!user) return;
         
         try {
-          // Menggunakan Pollinations.ai (Model Flux) yang gratis tanpa API Key
-          const seed1 = Math.floor(Math.random() * 1000000);
-          const seed2 = Math.floor(Math.random() * 1000000);
-          const seed3 = Math.floor(Math.random() * 1000000);
-          const seed4 = Math.floor(Math.random() * 1000000);
-          
-          const [width, height] = aspectRatio === '16:9' ? [1280, 720] : aspectRatio === '9:16' ? [720, 1280] : [1024, 1024];
+          // Add a timeout promise to prevent hanging indefinitely
+          const timeoutPromise = new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Waktu pembuatan gambar habis (timeout). Silakan coba lagi dengan prompt yang lebih sederhana.')), 45000)
+          );
 
-          const imageResults = [
-            `https://image.pollinations.ai/prompt/${encodeURIComponent(finalPrompt)}?width=${width}&height=${height}&nologo=true&seed=${seed1}&model=flux`,
-            `https://image.pollinations.ai/prompt/${encodeURIComponent(finalPrompt)}?width=${width}&height=${height}&nologo=true&seed=${seed2}&model=flux`,
-            `https://image.pollinations.ai/prompt/${encodeURIComponent(finalPrompt)}?width=${width}&height=${height}&nologo=true&seed=${seed3}&model=flux`,
-            `https://image.pollinations.ai/prompt/${encodeURIComponent(finalPrompt)}?width=${width}&height=${height}&nologo=true&seed=${seed4}&model=flux`
-          ];
+          const generatePromise = ai.models.generateContent({
+            model: 'gemini-2.5-flash-image',
+            contents: {
+              parts: [
+                {
+                  text: finalPrompt,
+                },
+              ],
+            },
+            config: {
+              imageConfig: {
+                aspectRatio: aspectRatio,
+              },
+            },
+          });
+
+          const response = await Promise.race([generatePromise, timeoutPromise]) as any;
+
+          const imageResults: string[] = [];
+          for (const part of response.candidates?.[0]?.content?.parts || []) {
+            if (part.inlineData) {
+              const base64EncodeString = part.inlineData.data;
+              const imageUrl = `data:${part.inlineData.mimeType || 'image/png'};base64,${base64EncodeString}`;
+              imageResults.push(imageUrl);
+            }
+          }
+
+          if (imageResults.length === 0) {
+            throw new Error('Gagal membuat gambar. Prompt mungkin melanggar kebijakan keamanan atau model sedang sibuk.');
+          }
           
           setIsThinking(false);
           setMessages(prev => {
@@ -1219,7 +1098,7 @@ export default function ZhiyouApp() {
         
         while (!isDone) {
           const responseStream = await ai.models.generateContentStream({
-            model: 'gemini-3-flash-preview', // Always use 3 flash
+            model: 'gemini-2.5-flash', // Always use 2.5 flash
             contents: currentContents,
             config: config
           });
@@ -1248,18 +1127,17 @@ export default function ZhiyouApp() {
             let isReasoningExpanded = true;
             
             if (selectedModel === 'zhiyou-3') {
-              const fullThinkMatch = fullText.match(/<think>([\s\S]*?)<\/think>/i);
-              if (fullThinkMatch) {
-                reasoningText = fullThinkMatch[1].trim();
-                displayText = fullText.replace(/<think>[\s\S]*?<\/think>/i, '').trim();
-                isReasoningExpanded = false; // Auto-collapse when thinking is done
-              } else {
-                const openThinkMatch = fullText.match(/<think>([\s\S]*)/i);
-                if (openThinkMatch) {
-                  reasoningText = openThinkMatch[1].trim();
-                  displayText = fullText.replace(/<think>[\s\S]*/i, '').trim();
-                  isReasoningExpanded = true; // Keep expanded while thinking
+              if (fullText.includes('<think>') && fullText.includes('</think>')) {
+                const parts = fullText.split('</think>');
+                if (parts.length > 1) {
+                  reasoningText = parts[0].replace('<think>', '').trim();
+                  displayText = parts[1].trim();
+                  isReasoningExpanded = false; // Auto-collapse when thinking is done
                 }
+              } else if (fullText.includes('<think>')) {
+                 reasoningText = fullText.replace('<think>', '').trim();
+                 displayText = '';
+                 isReasoningExpanded = true; // Keep expanded while thinking
               }
             }
             
@@ -1295,7 +1173,7 @@ export default function ZhiyouApp() {
             });
             
             // Execute functions
-            const functionResponses = await Promise.all(functionCallsToHandle.map(async call => {
+            const functionResponses = functionCallsToHandle.map(call => {
               let result: any;
               if (call.name === 'getCurrentTime') {
                 try {
@@ -1312,63 +1190,6 @@ export default function ZhiyouApp() {
                 } catch (e) {
                   result = { error: 'Invalid expression' };
                 }
-              } else if (call.name === 'getWeather') {
-                try {
-                  const geoRes = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(call.args.location)}&count=1`);
-                  const geoData = await geoRes.json();
-                  if (!geoData.results || geoData.results.length === 0) {
-                    result = { error: 'Location not found' };
-                  } else {
-                    const { latitude, longitude, name, country } = geoData.results[0];
-                    const weatherRes = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m`);
-                    const weatherData = await weatherRes.json();
-                    result = { location: `${name}, ${country}`, current_weather: weatherData.current };
-                  }
-                } catch (e: any) {
-                  result = { error: `Failed to get weather: ${e.message}` };
-                }
-              } else if (call.name === 'readWebsiteContent') {
-                try {
-                  const res = await fetch(`/api/fetch-url?url=${encodeURIComponent(call.args.url)}`);
-                  const data = await res.json();
-                  if (data.error) {
-                    result = { error: data.error };
-                  } else {
-                    result = { content: data.text };
-                  }
-                } catch (e: any) {
-                  result = { error: `Failed to read website: ${e.message}` };
-                }
-              } else if (call.name === 'saveUserPreference') {
-                if (!user) {
-                  result = { error: 'User is not logged in' };
-                } else {
-                  try {
-                    const userRef = doc(db, 'users', user.uid);
-                    await setDoc(userRef, { 
-                      preferences: { [call.args.key]: call.args.value } 
-                    }, { merge: true });
-                    result = { success: true, message: `Saved ${call.args.key} = ${call.args.value}` };
-                  } catch (e: any) {
-                    result = { error: `Failed to save preference: ${e.message}` };
-                  }
-                }
-              } else if (call.name === 'getUserPreferences') {
-                if (!user) {
-                  result = { error: 'User is not logged in' };
-                } else {
-                  try {
-                    const userRef = doc(db, 'users', user.uid);
-                    const docSnap = await getDoc(userRef);
-                    if (docSnap.exists() && docSnap.data().preferences) {
-                      result = { preferences: docSnap.data().preferences };
-                    } else {
-                      result = { preferences: {} };
-                    }
-                  } catch (e: any) {
-                    result = { error: `Failed to get preferences: ${e.message}` };
-                  }
-                }
               } else {
                 result = { error: 'Unknown function' };
               }
@@ -1379,7 +1200,7 @@ export default function ZhiyouApp() {
                   response: result
                 }
               };
-            }));
+            });
             
             // Append function responses to history
             currentContents.push({
@@ -1394,16 +1215,19 @@ export default function ZhiyouApp() {
         }
       }
 
-      if (user && activeChatId) {
+      if (user) {
         try {
-          const chatRef = doc(db, 'users', user.uid, 'chats', activeChatId);
+          const chatRef = chatId 
+            ? doc(db, 'users', user.uid, 'chats', chatId)
+            : doc(collection(db, 'users', user.uid, 'chats'));
             
+          if (!chatId) setChatId(chatRef.id);
+          
           setMessages(prev => {
             const msgsToSave = prev.map(m => ({
               role: m.role,
               text: m.text,
               reasoning: m.reasoning || null,
-              model: m.model || null,
               attachments: m.attachments?.map(a => ({
                 base64: a.base64,
                 mimeType: a.mimeType,
@@ -1572,7 +1396,7 @@ export default function ZhiyouApp() {
               <div className="w-5 h-5 rounded-full bg-white border border-gray-200 flex items-center justify-center shadow-sm">
                 <ZhiyouLogo className="w-3.5 h-3.5" />
               </div>
-              {selectedModel === 'gemini-3-flash-preview' ? t('modelZhiyou25') : selectedModel === 'zhiyou-3' ? t('modelZhiyou3') : selectedModel === 'zhiyou-art-2.0' ? 'Zhiyou Art 2.0' : 'Zhiyou Art'}
+              {selectedModel === 'gemini-2.5-flash' ? t('modelZhiyou25') : selectedModel === 'zhiyou-3' ? t('modelZhiyou3') : selectedModel === 'zhiyou-art-2.0' ? 'Zhiyou Art 2.0' : 'Zhiyou Art'}
               <ChevronDown className={`w-4 h-4 text-gray-500 transition-transform ${isModelMenuOpen ? 'rotate-180' : ''}`} />
             </button>
           </div>
@@ -1905,7 +1729,7 @@ export default function ZhiyouApp() {
                                       exit={{ height: 0, opacity: 0 }}
                                       className="overflow-hidden mt-2"
                                     >
-                                      <div className="p-4 bg-gray-50/80 rounded-xl border-l-4 border-l-gray-300 border-y border-r border-y-gray-100 border-r-gray-100 text-sm text-gray-600 italic leading-relaxed whitespace-pre-wrap">
+                                      <div className="p-4 bg-gray-50/80 rounded-xl border-l-4 border-l-gray-300 border-y border-r border-y-gray-100 border-r-gray-100 text-sm text-gray-500 italic leading-relaxed whitespace-pre-wrap">
                                         {msg.reasoning}
                                       </div>
                                     </motion.div>
@@ -2230,7 +2054,7 @@ export default function ZhiyouApp() {
                   </div>
                   
                   <button 
-                    onClick={() => handleSend()}
+                    onClick={handleSend}
                     disabled={(!input.trim() && attachments.length === 0) || isLoading}
                     className="p-2 bg-gray-200 hover:bg-gray-300 active:scale-90 disabled:opacity-50 disabled:hover:bg-gray-200 disabled:active:scale-100 rounded-full transition-all text-gray-700"
                   >
@@ -2439,8 +2263,8 @@ export default function ZhiyouApp() {
               
               <div className="space-y-3">
                 <button 
-                  onClick={() => { handleModelOrFeatureChange('gemini-3-flash-preview', (featureMode === 'imageSearch' || featureMode === 'image') ? 'chat' : featureMode); setIsModelMenuOpen(false); }}
-                  className={`w-full flex items-center justify-between p-4 rounded-2xl border transition-all active:scale-[0.98] ${selectedModel === 'gemini-3-flash-preview' ? 'border-blue-500 bg-blue-50/30' : 'border-gray-200 hover:border-blue-300 hover:bg-gray-50'}`}
+                  onClick={() => { handleModelOrFeatureChange('gemini-2.5-flash', (featureMode === 'imageSearch' || featureMode === 'image') ? 'chat' : featureMode); setIsModelMenuOpen(false); }}
+                  className={`w-full flex items-center justify-between p-4 rounded-2xl border transition-all active:scale-[0.98] ${selectedModel === 'gemini-2.5-flash' ? 'border-blue-500 bg-blue-50/30' : 'border-gray-200 hover:border-blue-300 hover:bg-gray-50'}`}
                 >
                   <div className="flex items-center gap-4">
                     <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center text-blue-600">
@@ -2451,7 +2275,7 @@ export default function ZhiyouApp() {
                       <p className="text-sm text-gray-500">{t('modelZhiyou25Desc')}</p>
                     </div>
                   </div>
-                  {selectedModel === 'gemini-3-flash-preview' && <Check className="w-5 h-5 text-blue-600" />}
+                  {selectedModel === 'gemini-2.5-flash' && <Check className="w-5 h-5 text-blue-600" />}
                 </button>
 
                 <button 
