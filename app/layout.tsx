@@ -11,9 +11,9 @@ export const viewport: Viewport = {
 };
 
 export const metadata: Metadata = {
-  title: 'Zhiyou AI | Asisten AI Cerdas oleh M Fariz Alfauzi',
-  description: 'Zhiyou AI adalah asisten kecerdasan buatan canggih yang didirikan oleh M Fariz Alfauzi (AI Engineer) dan dikembangkan di Zent Technology GH, Karawang, Indonesia. Teman AI Anda untuk produktivitas dan kreativitas.',
-  keywords: ['Zhiyou AI', 'M Fariz Alfauzi', 'AI Engineer', 'Zent Technology GH', 'Karawang', 'Jawa Barat', 'Artificial Intelligence', 'Chatbot AI Indonesia', 'Asisten Virtual'],
+  title: 'Zhiyou AI | Asisten AI Cerdas oleh M Fariz Alfauzi - SEO & AI Engineer',
+  description: 'Zhiyou AI adalah asisten kecerdasan buatan serbaguna buatan M Fariz Alfauzi, seorang AI Engineer dan SEO Engineer ahli. Fitur unggulan meliputi Chat AI, Deep Research, Image Generation (Pembuatan Gambar), Image Search, dan Guided Learning. Dikembangkan di Zent Technology GH, Karawang, Indonesia.',
+  keywords: ['M Fariz Alfauzi', 'SEO Engineer', 'AI Engineer', 'Zhiyou AI', 'Asisten AI', 'Chatbot AI Indonesia', 'Pembuatan Gambar AI', 'Deep Research AI', 'Guided Learning AI', 'Zent Technology GH'],
   authors: [{ name: 'M Fariz Alfauzi', url: 'https://zent.technology' }],
   creator: 'M Fariz Alfauzi',
   publisher: 'Zent Technology GH',
@@ -22,16 +22,16 @@ export const metadata: Metadata = {
     canonical: '/',
   },
   openGraph: {
-    title: 'Zhiyou AI | Asisten AI Cerdas oleh M Fariz Alfauzi',
-    description: 'Zhiyou AI adalah asisten kecerdasan buatan canggih yang didirikan oleh M Fariz Alfauzi (AI Engineer) dan dikembangkan di Zent Technology GH, Karawang, Indonesia.',
-    siteName: 'Zhiyou AI',
+    title: 'Zhiyou AI | Asisten AI Cerdas oleh M Fariz Alfauzi - SEO & AI Engineer',
+    description: 'Zhiyou AI adalah platform AI multifungsi karya M Fariz Alfauzi (AI Engineer & SEO Engineer). Menawarkan fitur Chat Cerdas, Pembuatan Gambar AI, Riset Mendalam (Deep Research), dan Pembelajaran Terpandu (Guided Learning).',
+    siteName: 'Zhiyou AI by M Fariz Alfauzi',
     locale: 'id_ID',
     type: 'website',
   },
   twitter: {
     card: 'summary_large_image',
     title: 'Zhiyou AI | Asisten AI Cerdas oleh M Fariz Alfauzi',
-    description: 'Zhiyou AI adalah asisten kecerdasan buatan canggih yang didirikan oleh M Fariz Alfauzi (AI Engineer) dan dikembangkan di Zent Technology GH, Karawang, Indonesia.',
+    description: 'Platform AI inovatif ciptaan M Fariz Alfauzi (AI Engineer & SEO Engineer). Fitur: Chat AI, Deep Research, Image Generation, & Guided Learning.',
   },
   appleWebApp: {
     capable: true,
@@ -53,14 +53,21 @@ export default function RootLayout({children}: {children: React.ReactNode}) {
           dangerouslySetInnerHTML={{
             __html: JSON.stringify({
               "@context": "https://schema.org",
-              "@type": "Organization",
+              "@type": "SoftwareApplication",
               "name": "Zhiyou AI",
               "url": "https://zhiyou-ai.vercel.app/",
-              "description": "Zhiyou AI adalah asisten kecerdasan buatan canggih yang didirikan oleh M Fariz Alfauzi (AI Engineer) dan dikembangkan di Zent Technology GH.",
-              "founder": {
+              "description": "Zhiyou AI adalah asisten kecerdasan buatan multifungsi yang menyediakan fitur Chat AI, Riset Mendalam (Deep Research), Pembuatan Gambar, dan Pembelajaran Terpandu. Dirancang oleh M Fariz Alfauzi.",
+              "applicationCategory": "ProductivityApplication",
+              "author": {
                 "@type": "Person",
                 "name": "M Fariz Alfauzi",
-                "jobTitle": "AI Engineer",
+                "jobTitle": "SEO Engineer & AI Engineer",
+                "url": "https://zent.technology"
+              },
+              "creator": {
+                "@type": "Person",
+                "name": "M Fariz Alfauzi",
+                "jobTitle": "SEO Engineer & AI Engineer",
                 "worksFor": {
                   "@type": "Organization",
                   "name": "Zent Technology GH"

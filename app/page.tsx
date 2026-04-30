@@ -67,6 +67,53 @@ const ZhiyouLogo = ({ className = "w-5 h-5" }: { className?: string }) => (
   </svg>
 );
 
+enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId?: string | null;
+    email?: string | null;
+    emailVerified?: boolean | null;
+    isAnonymous?: boolean | null;
+    tenantId?: string | null;
+    providerInfo?: {
+      providerId?: string | null;
+      email?: string | null;
+    }[];
+  }
+}
+
+function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth.currentUser?.uid,
+      email: auth.currentUser?.email,
+      emailVerified: auth.currentUser?.emailVerified,
+      isAnonymous: auth.currentUser?.isAnonymous,
+      tenantId: auth.currentUser?.tenantId,
+      providerInfo: auth.currentUser?.providerData?.map(provider => ({
+        providerId: provider.providerId,
+        email: provider.email,
+      })) || []
+    },
+    operationType,
+    path
+  }
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  throw new Error(JSON.stringify(errInfo));
+}
+
 export default function ZhiyouApp() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [user, setUser] = useState<User | null>(null);
@@ -363,7 +410,7 @@ export default function ZhiyouApp() {
       
       showToast("Gambar berhasil disimpan ke Zhiyou Firebase!", 'success');
     } catch (error) {
-      console.error("Error saving to Firebase:", error);
+      handleFirestoreError(error, OperationType.WRITE, `image_cache OR users/${user.uid}/gallery`);
       showToast("Gagal menyimpan gambar.", 'error');
     }
   };
@@ -508,14 +555,24 @@ export default function ZhiyouApp() {
           setProUses(data.proUses);
         } else {
           // Initialize pro uses if not present
-          await setDoc(userRef, { proUses: 5 }, { merge: true });
+          try {
+            await setDoc(userRef, { proUses: 5 }, { merge: true });
+          } catch (error) {
+            handleFirestoreError(error, OperationType.WRITE, `users/${user.uid}`);
+          }
           setProUses(5);
         }
       } else {
         // Create user document with initial pro uses
-        await setDoc(userRef, { proUses: 5, createdAt: serverTimestamp() });
+        try {
+          await setDoc(userRef, { proUses: 5, createdAt: serverTimestamp() });
+        } catch (error) {
+          handleFirestoreError(error, OperationType.WRITE, `users/${user.uid}`);
+        }
         setProUses(5);
       }
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, `users/${user.uid}`);
     });
 
     return () => unsubscribe();
@@ -547,6 +604,8 @@ export default function ZhiyouApp() {
         setMessages(history[0].messages || []);
         hasLoadedInitialChat.current = true;
       }
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, `users/${user.uid}/chats`);
     });
     
     return () => unsubscribe();
@@ -572,7 +631,7 @@ export default function ZhiyouApp() {
         setMessages(chatDoc.data().messages || []);
       }
     } catch (error) {
-      console.error("Error loading chat:", error);
+      handleFirestoreError(error, OperationType.GET, `users/${user.uid}/chats/${id}`);
     }
   };
 
@@ -586,7 +645,7 @@ export default function ZhiyouApp() {
       }
       setChatToDelete(null);
     } catch (error) {
-      console.error("Error deleting chat:", error);
+      handleFirestoreError(error, OperationType.DELETE, `users/${user.uid}/chats/${chatToDelete}`);
     }
   };
 
@@ -627,7 +686,7 @@ export default function ZhiyouApp() {
       
       return resolvedChatId;
     } catch (dbError) {
-      console.error("Error saving to Firestore:", dbError);
+      handleFirestoreError(dbError, OperationType.WRITE, `users/${user.uid}/chats/${resolvedChatId}`);
       return resolvedChatId;
     }
   };
@@ -1052,8 +1111,12 @@ export default function ZhiyouApp() {
 
         // Deduct pro use if not developer
         if (!isDeveloper && proUses !== null && proUses > 0) {
-          const userRef = doc(db, 'users', user.uid);
-          await setDoc(userRef, { proUses: proUses - 1 }, { merge: true });
+          try {
+            const userRef = doc(db, 'users', user.uid);
+            await setDoc(userRef, { proUses: proUses - 1 }, { merge: true });
+          } catch (error) {
+            handleFirestoreError(error, OperationType.WRITE, `users/${user.uid}`);
+          }
         }
       }
 
@@ -2125,7 +2188,7 @@ export default function ZhiyouApp() {
             />
             <p className="text-center text-xs text-gray-400 mt-4 hidden sm:block relative z-10">
               {t('disclaimer')}<br/>
-              &copy;2026 Zhiyou AI | Zent Inc.
+              &copy; {new Date().getFullYear()} Zhiyou AI | Developed by <strong>M Fariz Alfauzi</strong> (SEO Engineer & AI Engineer) | Zent Technology GH.
             </p>
           </div>
         </div>
